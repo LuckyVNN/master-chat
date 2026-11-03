@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Master Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav id="sidebar">
+    <div id="accounts"></div>
+    <button id="add" class="tool" title="Add account" aria-label="Add account">+</button>
+    <div class="spacer"></div>
+    <button id="dnd" class="tool plain" title="Do Not Disturb" aria-label="Do Not Disturb">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12.3 2a8 8 0 1 0 9.7 9.7A7 7 0 0 1 12.3 2z"/></svg>
+    </button>
+    <button id="manage" class="tool plain" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+    </button>
+  </nav>
+
+  <main id="content">
+    <section id="welcome" class="panel" hidden>
+      <h1>Master Chat</h1>
+      <p>All your inboxes and chats in one window. Each account runs in its own sealed browser profile, and the pages can't touch the app or your files.</p>
+      <button class="primary" data-open="add-panel">Add your first account</button>
+    </section>
+
+    <section id="lock-panel" class="panel narrow" hidden>
+      <div class="lock-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="34" height="34"><path fill="currentColor" d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zm-7-2a2 2 0 0 1 4 0v2h-4V7z"/></svg>
+      </div>
+      <h2>Master Chat is locked</h2>
+      <label class="field">PIN
+        <input id="unlock-pin" type="password" maxlength="32" autocomplete="off" inputmode="numeric">
+      </label>
+      <p id="unlock-error" class="error" hidden></p>
+      <div class="actions"><button id="confirm-unlock" class="primary wide">Unlock</button></div>
+    </section>
+
+    <section id="add-panel" class="panel" hidden>
+      <h2>Add an account</h2>
+      <div id="service-grid" class="grid"></div>
+      <label class="field">Name <span class="hint">(optional, e.g. "Work")</span>
+        <input id="label" maxlength="40" autocomplete="off">
+      </label>
+      <div class="actions">
+        <button class="ghost" data-close>Cancel</button>
+        <button id="confirm-add" class="primary" disabled>Add</button>
+      </div>
+    </section>
+
+    <section id="edit-panel" class="panel" hidden>
+      <h2>Edit account</h2>
+      <label class="field">Name
+        <input id="edit-label" maxlength="40" autocomplete="off">
+      </label>
+      <div class="field">Icon color
+        <div id="swatches" class="swatches"></div>
+      </div>
+      <div class="actions">
+        <button class="ghost" data-close>Cancel</button>
+        <button id="confirm-edit" class="primary">Save</button>
+      </div>
+    </section>
+
+    <section id="manage-panel" class="panel wide-panel" hidden>
+      <h2>Settings</h2>
+
+      <h3>Accounts</h3>
+      <ul id="manage-list"></ul>
+      <p class="hint">Right-click an account in the sidebar for more (notifications, zoom, hide typing), and drag it to reorder. Removing an account deletes its browser profile on this computer, which signs it out for good.</p>
+
+      <h3>Appearance</h3>
+      <div class="row">
+        <span>Theme</span>
+        <div class="segmented" id="theme">
+          <button data-theme="system">System</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button>
+        </div>
+      </div>
+      <label class="row"><span>Show names under icons</span><input type="checkbox" data-setting="show_labels"></label>
+
+      <h3>Notifications</h3>
+      <label class="row"><span>Show notifications</span><input type="checkbox" data-setting="notifications"></label>
+      <label class="row"><span>Show message text <small>Off: only which account has news</small></span><input type="checkbox" data-setting="notification_preview"></label>
+      <div class="row"><span>Do Not Disturb <small id="dnd-status"></small></span><button id="dnd-settings" class="ghost">Change…</button></div>
+
+      <h3>Window</h3>
+      <label class="row"><span>Keep running in the tray when closed</span><input type="checkbox" data-setting="close_to_tray"></label>
+      <label class="row"><span>Start with Windows</span><input type="checkbox" data-setting="start_with_windows"></label>
+      <label class="row"><span>Start minimized to the tray</span><input type="checkbox" data-setting="start_minimized"></label>
+
+      <h3>Privacy and security</h3>
+      <label class="row"><span>Panic hide <small>Ctrl+Alt+H hides the window (and locks it, if the lock is on)</small></span><input type="checkbox" data-setting="panic_shortcut"></label>
+      <div class="row"><span>App lock <small id="lock-status"></small></span><span class="buttons" id="lock-buttons"></span></div>
+      <div class="row" id="idle-row"><span>Lock after no activity for</span>
+        <select id="idle-minutes">
+          <option value="0">Never</option><option value="1">1 minute</option><option value="5">5 minutes</option>
+          <option value="10">10 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option>
+        </select>
+      </div>
+      <div id="pin-form" class="pin-form" hidden>
+        <input id="pin-current" type="password" maxlength="32" placeholder="Current PIN" autocomplete="off">
+        <input id="pin-new" type="password" maxlength="32" placeholder="New PIN (4 or more characters)" autocomplete="off">
+        <input id="pin-repeat" type="password" maxlength="32" placeholder="New PIN again" autocomplete="off">
+        <p id="pin-error" class="error" hidden></p>
+        <div class="actions">
+          <button id="pin-cancel" class="ghost">Cancel</button>
+          <button id="pin-save" class="primary">Save PIN</button>
+        </div>
+      </div>
+
+      <h3>Updates</h3>
+      <div class="row"><span>Version <span id="version"></span> <small id="update-status"></small></span><button id="check-update" class="ghost">Check for updates</button></div>
+
+      <div class="actions"><button class="primary" data-close>Done</button></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

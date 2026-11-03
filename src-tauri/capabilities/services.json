@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "services",
+  "description": "Service pages (remote sites) may only hand notifications to the app; the command checks which account is calling and rate-limits it.",
+  "windows": [],
+  "webviews": ["acc-*"],
+  "remote": {
+    "urls": [
+      "https://*.google.com/*",
+      "https://*.live.com/*",
+      "https://*.office.com/*",
+      "https://*.cloud.microsoft/*",
+      "https://*.facebook.com/*",
+      "https://*.messenger.com/*",
+      "https://*.zalo.me/*",
+      "https://*.whatsapp.com/*",
+      "https://*.telegram.org/*",
+      "https://discord.com/*",
+      "https://*.discord.com/*"
+    ]
+  },
+  "permissions": ["allow-notify"]
+}

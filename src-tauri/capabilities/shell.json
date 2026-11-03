@@ -1,0 +1,28 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell",
+  "description": "The local sidebar UI. Only it can manage accounts and settings.",
+  "windows": [],
+  "webviews": ["shell"],
+  "permissions": [
+    "allow-list-services",
+    "allow-list-accounts",
+    "allow-add-account",
+    "allow-remove-account",
+    "allow-select-account",
+    "allow-reload-account",
+    "allow-update-account",
+    "allow-reorder-accounts",
+    "allow-show-account-menu",
+    "allow-show-dnd-menu",
+    "allow-set-overlay",
+    "allow-update-settings",
+    "allow-set-dnd",
+    "allow-set-pin",
+    "allow-disable-lock",
+    "allow-unlock",
+    "allow-lock-now",
+    "allow-check-update",
+    "allow-install-update"
+  ]
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-dnd-menu"
+description = "Enables the show_dnd_menu command without any pre-configured scope."
+commands.allow = ["show_dnd_menu"]
+
+[[permission]]
+identifier = "deny-show-dnd-menu"
+description = "Denies the show_dnd_menu command without any pre-configured scope."
+commands.deny = ["show_dnd_menu"]
