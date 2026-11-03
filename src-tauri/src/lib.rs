@@ -38,6 +38,8 @@ const SHELL: &str = "shell";
 const PANIC_SHORTCUT: &str = "ctrl+alt+h";
 /// A service may show at most this many notifications per 10 seconds.
 const NOTIFY_BURST: usize = 5;
+/// The dashboard lists this many of the latest messages.
+const RECENT_MAX: usize = 30;
 
 pub(crate) struct Inner {
     accounts: Vec<Account>,
@@ -53,6 +55,19 @@ pub(crate) struct Inner {
     notify_log: HashMap<String, VecDeque<u128>>,
     /// Which account webviews were last asked to use little memory.
     low_memory: HashMap<String, bool>,
+    /// The latest messages, newest first, for the dashboard. Only ever in memory.
+    recent: VecDeque<Recent>,
+}
+
+#[derive(Serialize, Clone)]
+struct Recent {
+    account: String,
+    /// The page's notification id, to open that chat when clicked.
+    id: u32,
+    /// Empty when message previews are off.
+    title: String,
+    body: String,
+    at: u64,
 }
 
 pub(crate) struct AppState {
@@ -80,6 +95,7 @@ struct Snapshot {
     locked: bool,
     settings: SettingsView,
     version: String,
+    recent: Vec<Recent>,
 }
 
 pub(crate) fn now_secs() -> u64 {
@@ -148,6 +164,7 @@ fn snapshot(app: &AppHandle) -> Snapshot {
         locked: inner.locked,
         settings,
         version: app.package_info().version.to_string(),
+        recent: if inner.locked { Vec::new() } else { inner.recent.iter().cloned().collect() },
     }
 }
 
@@ -275,6 +292,8 @@ fn select(app: &AppHandle, id: &str) {
     if let Some(w) = app.get_webview(&webview_label(id)) {
         let _ = w.set_focus();
     }
+    let id = serde_json::to_string(id).unwrap_or_default();
+    call_shell(app, format!("window.masterChat && window.masterChat.selected({id})"));
 }
 
 pub(crate) fn lock_app(app: &AppHandle) {
@@ -459,6 +478,7 @@ async fn remove_account(app: AppHandle, webview: Webview, state: State<'_, AppSt
         let mut inner = state.inner.lock().unwrap();
         inner.unread.remove(&id);
         inner.low_memory.remove(&id);
+        inner.recent.retain(|r| r.account != id);
     }
     layout(&app);
     Ok(snapshot(&app))
@@ -711,8 +731,40 @@ async fn install_update(app: AppHandle, webview: Webview, state: State<'_, AppSt
     app.restart();
 }
 
-/// The one command a service page may call (capabilities/services.json): show
-/// a notification for the account whose webview is calling.
+/// Shows the window and opens the chat a notification was about.
+fn open_message(app: &AppHandle, account_id: &str, id: u32) {
+    show_window(app);
+    if app.state::<AppState>().inner.lock().unwrap().locked {
+        return;
+    }
+    select(app, account_id);
+    refresh_shell(app);
+    if let Some(w) = app.get_webview(&webview_label(account_id)) {
+        let _ = w.eval(format!("window.__mcNotificationClicked && window.__mcNotificationClicked({id})"));
+    }
+}
+
+/// Opens a message from the dashboard's recent list.
+#[tauri::command]
+fn open_recent(app: AppHandle, webview: Webview, state: State<'_, AppState>, account: String, id: u32) -> Result<(), String> {
+    guard(&webview, &state)?;
+    if !state.inner.lock().unwrap().accounts.iter().any(|a| a.id == account) {
+        return Err("unknown account".into());
+    }
+    open_message(&app, &account, id);
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_recent(app: AppHandle, webview: Webview, state: State<'_, AppState>) -> Result<Snapshot, String> {
+    guard(&webview, &state)?;
+    state.inner.lock().unwrap().recent.clear();
+    Ok(snapshot(&app))
+}
+
+/// The one command a service page may call (capabilities/services.json): note
+/// a message for the dashboard and maybe show a notification, for the account
+/// whose webview is calling.
 #[tauri::command]
 fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32, title: String, body: String) -> Result<(), String> {
     let account_id = webview.label().strip_prefix("acc-").ok_or("forbidden")?.to_string();
@@ -720,20 +772,11 @@ fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32,
         let s = state.settings.lock().unwrap();
         (s.notifications && !s.dnd_active(), s.notification_preview)
     };
-    if !enabled {
-        return Ok(());
-    }
-    let (label, locked) = {
+    let short = |s: &str, n: usize| s.chars().filter(|c| !c.is_control()).take(n).collect::<String>();
+    let (label, locked, show) = {
         let mut inner = state.inner.lock().unwrap();
         let account = inner.accounts.iter().find(|a| a.id == account_id).ok_or("unknown account")?;
-        if !account.notify {
-            return Ok(());
-        }
-        let label = account.label.clone();
-        // Not while you're looking at that account.
-        if inner.focused && !inner.locked && !inner.overlay && inner.active.as_deref() == Some(&account_id) {
-            return Ok(());
-        }
+        let (label, muted) = (account.label.clone(), !account.notify);
         let now = now_millis();
         let log = inner.notify_log.entry(account_id.clone()).or_default();
         log.retain(|t| now - t < 10_000);
@@ -741,9 +784,19 @@ fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32,
             return Ok(());
         }
         log.push_back(now);
-        (label, inner.locked)
+        // The dashboard lists it even when muted or in Do Not Disturb, so you
+        // can see what you missed.
+        let (recent_title, recent_body) = if preview { (short(&title, 100), short(&body, 300)) } else { Default::default() };
+        inner.recent.push_front(Recent { account: account_id.clone(), id, title: recent_title, body: recent_body, at: now_secs() });
+        inner.recent.truncate(RECENT_MAX);
+        // No pop-up while you're looking at that account.
+        let looking = inner.focused && !inner.locked && !inner.overlay && inner.active.as_deref() == Some(&account_id);
+        (label, inner.locked, enabled && !muted && !looking)
     };
-    let short = |s: &str, n: usize| s.chars().filter(|c| !c.is_control()).take(n).collect::<String>();
+    refresh_shell(&app);
+    if !show {
+        return Ok(());
+    }
     // Locked, or with previews off, a notification only says which account has news.
     let (title, body) = if locked || !preview {
         (label, "New message".to_string())
@@ -752,15 +805,7 @@ fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32,
     };
     let click_app = app.clone();
     system::toast(&system::app_id(&app.config().identifier), &title, &body, move || {
-        show_window(&click_app);
-        if click_app.state::<AppState>().inner.lock().unwrap().locked {
-            return;
-        }
-        select(&click_app, &account_id);
-        call_shell(&click_app, "window.masterChat && window.masterChat.refresh()".into());
-        if let Some(w) = click_app.get_webview(&webview_label(&account_id)) {
-            let _ = w.eval(format!("window.__mcNotificationClicked && window.__mcNotificationClicked({id})"));
-        }
+        open_message(&click_app, &account_id, id)
     })
 }
 
@@ -808,6 +853,8 @@ pub fn run() {
             lock_now,
             check_update,
             install_update,
+            open_recent,
+            clear_recent,
             notify
         ])
         .on_menu_event(|app, event| menus::on_menu_event(app, event.id().as_ref()))
@@ -827,7 +874,8 @@ pub fn run() {
                 inner: Mutex::new(Inner {
                     accounts: accounts.clone(),
                     active: active.clone(),
-                    overlay: false,
+                    // The shell opens on the overview.
+                    overlay: true,
                     unread: HashMap::new(),
                     locked: settings.lock.enabled,
                     failed_unlocks: 0,
@@ -835,6 +883,7 @@ pub fn run() {
                     focused: true,
                     notify_log: HashMap::new(),
                     low_memory: HashMap::new(),
+                    recent: VecDeque::new(),
                 }),
                 settings: Mutex::new(settings),
                 accounts_file,

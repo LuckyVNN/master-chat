@@ -199,3 +199,64 @@ body.labels #accounts { gap: 6px; }
 #manage-list .name { flex: 1; }
 #manage-list .name small { display: block; color: var(--muted); }
 #manage-list .ghost { padding: 5px 10px; }
+
+#home.current { color: var(--text); background: var(--card); border-color: var(--line); border-style: solid; }
+/* While the overview is open, no account is the one on screen. */
+#home.current ~ #accounts .slot.active .acct { border-radius: 14px; box-shadow: none; }
+#home.current ~ #accounts .slot.active .name { color: var(--muted); font-weight: 400; }
+
+/* The overview. */
+.panel.dash { width: min(860px, 100%); align-self: start; }
+.dash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.dash-head h2 { margin-bottom: 2px; }
+.dash-head p { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.chip { padding: 3px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); font-size: 12px; white-space: nowrap; }
+.chip.dnd { background: #8b5cf6; border-color: transparent; color: #fff; }
+
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  text-align: left;
+}
+.card:hover { border-color: var(--c); }
+.card .dot { width: 38px; height: 38px; flex: none; border-radius: 11px; background: var(--c); }
+.card .who { flex: 1; min-width: 0; }
+.card .who b, .card .who small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .who b { font-weight: 600; }
+.card .who small { color: var(--muted); font-size: 12px; }
+.card .count { flex: none; text-align: right; }
+.card .count b { display: block; font-size: 22px; line-height: 1; color: var(--danger); font-variant-numeric: tabular-nums; }
+.card .count small { color: var(--muted); font-size: 11px; }
+.card .count .done { color: var(--muted); font-size: 12px; }
+
+.dash-recent-head { display: flex; align-items: center; justify-content: space-between; margin-top: 22px; }
+.dash-recent-head h3 { margin: 0; }
+.ghost.small { padding: 3px 10px; font-size: 12px; }
+#dash-recent { list-style: none; margin: 6px 0 0; padding: 0; }
+#dash-recent button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  border-radius: 0;
+}
+#dash-recent button:hover { background: var(--bg); }
+#dash-recent .dot { width: 28px; height: 28px; flex: none; border-radius: 8px; background: var(--c); }
+#dash-recent .msg { flex: 1; min-width: 0; }
+#dash-recent .msg b, #dash-recent .msg span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#dash-recent .msg b { font-weight: 600; }
+#dash-recent .msg span { color: var(--muted); font-size: 13px; }
+#dash-recent .meta { flex: none; color: var(--muted); font-size: 12px; text-align: right; max-width: 34%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#dash-empty { margin: 10px 0 0; }

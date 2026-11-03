@@ -11,7 +11,7 @@ const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 let services = [];
-let state = { accounts: [], active: null, locked: false, settings: {}, version: "" };
+let state = { accounts: [], active: null, locked: false, settings: {}, version: "", recent: [] };
 let picked = null;
 let editing = null;
 let editColor = "";
@@ -49,7 +49,7 @@ function render() {
   document.body.classList.toggle("labels", Boolean(state.settings.show_labels));
   $("#dnd").classList.toggle("on", Boolean(state.settings.dnd_until));
   $("#dnd").title = state.settings.dnd_until ? "Do Not Disturb is on" : "Do Not Disturb";
-  for (const id of ["#add", "#dnd", "#manage"]) $(id).hidden = state.locked;
+  for (const id of ["#home", "#add", "#dnd", "#manage"]) $(id).hidden = state.locked;
   renderSidebar();
   if (state.locked) {
     showOnly("lock-panel");
@@ -58,6 +58,76 @@ function render() {
     showOnly(state.accounts.length ? null : "welcome");
   }
   if (!$("#manage-panel").hidden) renderSettings();
+  if (!$("#dashboard").hidden) renderDashboard();
+}
+
+function ago(seconds) {
+  const s = Math.max(0, Date.now() / 1000 - seconds);
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h`;
+  return new Date(seconds * 1000).toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+// The overview: every account's unread count and the latest messages.
+function renderDashboard() {
+  const total = state.accounts.reduce((sum, a) => sum + a.unread, 0);
+  const waiting = state.accounts.filter((a) => a.unread > 0).length;
+  const n = state.accounts.length;
+  $("#dash-summary").textContent = total
+    ? `${total} unread in ${waiting} of your ${n} account${n === 1 ? "" : "s"}`
+    : `You're all caught up across ${n} account${n === 1 ? "" : "s"}`;
+
+  const s = state.settings;
+  const chips = [];
+  if (s.dnd_until) chips.push(el("span", { className: "chip dnd", textContent: "Do Not Disturb" }));
+  if (!s.notifications) chips.push(el("span", { className: "chip", textContent: "Notifications off" }));
+  if (s.lock_enabled) chips.push(el("span", { className: "chip", textContent: "App lock on" }));
+  $("#dash-status").replaceChildren(...chips);
+
+  $("#dash-accounts").replaceChildren(
+    ...state.accounts.map((a) => {
+      const svc = serviceOf(a.service);
+      const count = a.unread
+        ? [el("b", { textContent: a.unread > 999 ? "999+" : a.unread }), el("small", { textContent: "unread" })]
+        : [el("span", { className: "done", textContent: "Up to date" })];
+      return el("button", { className: "card", style: `--c:${colorOf(a)}`, onclick: () => select(a.id) }, [
+        logo(svc.id, colorOf(a), "dot"),
+        el("span", { className: "who" }, [
+          el("b", { textContent: a.label }),
+          el("small", { textContent: svc.name + (a.notify ? "" : " · muted") }),
+        ]),
+        el("span", { className: "count" }, count),
+      ]);
+    })
+  );
+
+  const recent = state.recent.filter((r) => state.accounts.some((a) => a.id === r.account));
+  $("#dash-recent").replaceChildren(
+    ...recent.map((r) => {
+      const a = state.accounts.find((x) => x.id === r.account);
+      const svc = serviceOf(a.service);
+      return el("li", {}, [
+        el("button", { onclick: () => openRecent(r) }, [
+          logo(svc.id, colorOf(a), "dot"),
+          el("span", { className: "msg" }, [
+            el("b", { textContent: r.title || "New message" }),
+            el("span", { textContent: r.body || (r.title ? "" : "Message text is hidden in Settings") }),
+          ]),
+          el("span", { className: "meta", textContent: `${a.label} · ${ago(r.at)}` }),
+        ]),
+      ]);
+    })
+  );
+  $("#dash-empty").hidden = recent.length > 0;
+  $("#clear-recent").hidden = recent.length === 0;
+}
+
+async function openRecent(r) {
+  state.active = r.account;
+  renderSidebar();
+  showOnly(null);
+  await invoke("open_recent", { account: r.account, id: r.id });
 }
 
 function renderSidebar() {
@@ -169,6 +239,7 @@ function setState(next) {
 
 function showOnly(id) {
   for (const p of $$(".panel")) p.hidden = p.id !== id;
+  $("#home").classList.toggle("current", id === "dashboard");
 }
 
 // Panels sit under the service webviews, so the active one is hidden while a panel is open.
@@ -186,6 +257,7 @@ async function openPanel(id) {
     $("#update-status").textContent = "";
     renderSettings();
   }
+  if (id === "dashboard") renderDashboard();
   await invoke("set_overlay", { open: true });
 }
 
@@ -204,6 +276,10 @@ async function select(id) {
 
 const update = (changes) => invoke("update_settings", { update: changes }).then(setState).catch((e) => alert(e));
 
+$("#home").addEventListener("click", () => openPanel("dashboard"));
+$("#clear-recent").addEventListener("click", async () => setState(await invoke("clear_recent")));
+// Keeps "5 min" and the like current while the overview is open.
+setInterval(() => $("#dashboard").hidden || renderDashboard(), 30000);
 $("#add").addEventListener("click", () => openPanel("add-panel"));
 $("#manage").addEventListener("click", () => openPanel("manage-panel"));
 $("#dnd").addEventListener("click", () => invoke("show_dnd_menu"));
@@ -247,6 +323,7 @@ const unlock = async () => {
     $("#unlock-error").hidden = true;
     showOnly(next.accounts.length ? null : "welcome");
     setState(next);
+    if (next.accounts.length) openPanel("dashboard");
   } catch (e) {
     $("#unlock-error").textContent = String(e);
     $("#unlock-error").hidden = false;
@@ -360,10 +437,19 @@ window.masterChat = {
     if (acct) {
       acct.unread = count;
       renderSidebar();
+      if (!$("#dashboard").hidden) renderDashboard();
     }
   },
   async refresh() {
     setState(await invoke("list_accounts"));
+  },
+  // An account was opened from outside the sidebar (a notification): any panel is behind it now.
+  selected(id) {
+    if (state.locked) return;
+    state.active = id;
+    renderSidebar();
+    if (!$("#lock-panel").hidden) return;
+    showOnly(null);
   },
   async edit(id) {
     const acct = state.accounts.find((a) => a.id === id);
@@ -389,5 +475,9 @@ window.masterChat = {
   services = await invoke("list_services");
   state = await invoke("list_accounts");
   render();
-  if (!state.locked && state.accounts.length === 0) showOnly("welcome");
+  if (!state.locked) {
+    // The overview is the start screen.
+    if (state.accounts.length === 0) showOnly("welcome");
+    else openPanel("dashboard");
+  }
 })();

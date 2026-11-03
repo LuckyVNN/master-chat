@@ -8,6 +8,9 @@
 </head>
 <body>
   <nav id="sidebar">
+    <button id="home" class="tool plain" title="Overview" aria-label="Overview">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z"/></svg>
+    </button>
     <div id="accounts"></div>
     <button id="add" class="tool" title="Add account" aria-label="Add account">+</button>
     <div class="spacer"></div>
@@ -24,6 +27,23 @@
       <h1>Master Chat</h1>
       <p>All your inboxes and chats in one window. Each account runs in its own sealed browser profile, and the pages can't touch the app or your files.</p>
       <button class="primary" data-open="add-panel">Add your first account</button>
+    </section>
+
+    <section id="dashboard" class="panel dash" hidden>
+      <header class="dash-head">
+        <div>
+          <h2>Overview</h2>
+          <p id="dash-summary"></p>
+        </div>
+        <div id="dash-status" class="chips"></div>
+      </header>
+      <div id="dash-accounts" class="dash-grid"></div>
+      <div class="dash-recent-head">
+        <h3>Recent messages</h3>
+        <button id="clear-recent" class="ghost small">Clear</button>
+      </div>
+      <ul id="dash-recent"></ul>
+      <p id="dash-empty" class="hint">Messages that arrive while Master Chat is open show up here, from every account, even muted ones or in Do Not Disturb. They're kept in memory only, never saved.</p>
     </section>
 
     <section id="lock-panel" class="panel narrow" hidden>

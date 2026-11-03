@@ -23,6 +23,8 @@
     "allow-unlock",
     "allow-lock-now",
     "allow-check-update",
-    "allow-install-update"
+    "allow-install-update",
+    "allow-open-recent",
+    "allow-clear-recent"
   ]
 }

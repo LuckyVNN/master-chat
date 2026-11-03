@@ -23,6 +23,8 @@ fn main() {
             "lock_now",
             "check_update",
             "install_update",
+            "open_recent",
+            "clear_recent",
             "notify",
         ]),
     ))
