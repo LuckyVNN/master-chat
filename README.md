@@ -8,7 +8,12 @@ Windows), with plain HTML/CSS/JS for the sidebar: no framework and no bundler.
 
 - **Sidebar:** right-click an account for Reload, Edit name and color, Notifications,
   Zoom, Move up/down and Remove; drag to reorder; optional names under the icons.
+- **Overview** (the start screen): every account's unread count and the latest messages
+  from all of them, kept in memory only.
 - **Notifications** as Windows notifications; clicking one opens that account and chat.
+  Messenger and Gmail are read by the app itself (sender and preview), since Messenger
+  only notifies by Web Push, which WebView2 lacks; other services get a plain notice if
+  their unread count rises without one.
   Per-account mute, Do Not Disturb (moon button or tray), and an option to hide the
   message text.
 - **Tray and taskbar:** the unread total shows on the taskbar button and tray tooltip;

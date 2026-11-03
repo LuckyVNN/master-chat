@@ -40,6 +40,11 @@ const PANIC_SHORTCUT: &str = "ctrl+alt+h";
 const NOTIFY_BURST: usize = 5;
 /// The dashboard lists this many of the latest messages.
 const RECENT_MAX: usize = 30;
+/// Browser options for a real-time account: Chromium slows a hidden page's
+/// timers, down to once a minute after five minutes, which delays new messages.
+/// wry's own defaults (the first three features) are kept.
+const REALTIME_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,IntensiveWakeUpThrottling \
+    --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows";
 
 pub(crate) struct Inner {
     accounts: Vec<Account>,
@@ -57,6 +62,9 @@ pub(crate) struct Inner {
     low_memory: HashMap<String, bool>,
     /// The latest messages, newest first, for the dashboard. Only ever in memory.
     recent: VecDeque<Recent>,
+    /// When each account's page last started loading (ms): its unread count
+    /// settles from 0 to the real number then, which isn't news.
+    loaded_at: HashMap<String, u128>,
 }
 
 #[derive(Serialize, Clone)]
@@ -86,6 +94,7 @@ struct AccountView {
     color: Option<String>,
     unread: u32,
     notify: bool,
+    realtime: bool,
 }
 
 #[derive(Serialize)]
@@ -102,7 +111,7 @@ pub(crate) fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-fn now_millis() -> u128 {
+pub(crate) fn now_millis() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())
 }
 
@@ -155,6 +164,7 @@ fn snapshot(app: &AppHandle) -> Snapshot {
                 color: a.color.clone(),
                 unread: inner.unread.get(&a.id).copied().unwrap_or(0),
                 notify: a.notify,
+                realtime: a.realtime,
             })
             .collect()
     };
@@ -183,6 +193,8 @@ fn layout(app: &AppHandle) {
     let Some(window) = app.get_window("main") else { return };
     let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
     let size = size.to_logical::<f64>(scale);
+    // Minimized or in the tray, no page is on screen, so each may notify.
+    let window_shown = window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
 
     if let Some(shell) = app.get_webview(SHELL) {
         let _ = shell.set_position(LogicalPosition::new(0.0, 0.0));
@@ -191,27 +203,29 @@ fn layout(app: &AppHandle) {
 
     // Collect first so no webview call runs while the lock is held. The memory
     // level is only sent when it changes, not on every resize.
-    let visible: Vec<(String, bool, bool)> = {
+    let visible: Vec<(String, bool, Option<bool>)> = {
         let state = app.state::<AppState>();
         let mut inner = state.inner.lock().unwrap();
-        let hidden = inner.overlay || inner.locked;
-        let shown: Vec<(String, bool)> = inner
+        let hidden = inner.overlay || inner.locked || !window_shown;
+        let shown: Vec<(String, bool, bool)> = inner
             .accounts
             .iter()
-            .map(|a| (a.id.clone(), !hidden && inner.active.as_deref() == Some(&a.id)))
+            .map(|a| (a.id.clone(), !hidden && inner.active.as_deref() == Some(&a.id), a.realtime))
             .collect();
         shown
             .into_iter()
-            .map(|(id, show)| {
-                let changed = inner.low_memory.insert(id.clone(), !show) != Some(!show);
-                (webview_label(&id), show, changed)
+            .map(|(id, show, realtime)| {
+                // Real-time accounts keep their memory, so they answer at once.
+                let low = !show && !realtime;
+                let changed = inner.low_memory.insert(id.clone(), low) != Some(low);
+                (webview_label(&id), show, changed.then_some(low))
             })
             .collect()
     };
-    for (label, show, memory_changed) in visible {
+    for (label, show, memory) in visible {
         let Some(webview) = app.get_webview(&label) else { continue };
-        if memory_changed {
-            system::set_low_memory(&webview, !show);
+        if let Some(low) = memory {
+            system::set_low_memory(&webview, low);
         }
         if show {
             let _ = webview.set_position(LogicalPosition::new(SIDEBAR, 0.0));
@@ -252,7 +266,18 @@ fn set_unread(app: &AppHandle, id: &str, count: u32) {
         if inner.unread.get(id) == Some(&count) {
             return;
         }
-        inner.unread.insert(id.to_string(), count);
+        let rose = inner.unread.insert(id.to_string(), count).is_some_and(|before| count > before);
+        let now = now_millis();
+        let settled = inner.loaded_at.get(id).is_none_or(|&t| now - t > 30_000);
+        let describes = inner
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .and_then(|a| services::find(&a.service))
+            .is_some_and(|s| s.describes_messages);
+        if rose && settled && !describes {
+            notice_if_silent(app, id.to_string(), now);
+        }
     }
     show_total_unread(app);
     let id = serde_json::to_string(id).unwrap_or_default();
@@ -265,6 +290,14 @@ pub(crate) fn show_window(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+    layout(app);
+}
+
+fn hide_window(app: &AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.hide();
+    }
+    layout(app);
 }
 
 fn apply_theme(app: &AppHandle, theme: &str) {
@@ -365,7 +398,7 @@ fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, p
     // meanwhile an organization's own login page (any HTTPS site) may load.
     let signing_in = Arc::new(AtomicBool::new(false));
 
-    let builder = WebviewBuilder::new(webview_label(&account.id), WebviewUrl::External(url))
+    let mut builder = WebviewBuilder::new(webview_label(&account.id), WebviewUrl::External(url))
         .data_directory(accounts::profile_dir(profiles, &account.id))
         .initialization_script(page_script(service, account))
         .focused(false)
@@ -392,13 +425,21 @@ fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, p
         .on_document_title_changed(move |_webview, title| {
             set_unread(&title_app, &id, services::unread_from_title(&title));
         });
+    if account.realtime {
+        builder = builder.additional_browser_args(REALTIME_ARGS);
+    }
 
     let webview = window
         .add_child(builder, LogicalPosition::new(-20000.0, 0.0), LogicalSize::new(800.0, 600.0))
         .map_err(|e| e.to_string())?;
     let _ = webview.set_zoom(account.zoom);
-    // The next layout sets this webview's memory level, whatever it recorded before it existed.
-    app.state::<AppState>().inner.lock().unwrap().low_memory.remove(&account.id);
+    {
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
+        // The next layout sets this webview's memory level, whatever it recorded before it existed.
+        inner.low_memory.remove(&account.id);
+        inner.loaded_at.insert(account.id.clone(), now_millis());
+    }
     Ok(())
 }
 
@@ -498,9 +539,38 @@ fn reload_account(app: AppHandle, webview: Webview, state: State<'_, AppState>, 
         return Err("unknown account".into());
     }
     if let Some(w) = app.get_webview(&webview_label(&id)) {
+        state.inner.lock().unwrap().loaded_at.insert(id.clone(), now_millis());
         w.reload().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Real-time on or off. Browser options are fixed when a page's browser starts,
+/// so the account's page is closed and opened again.
+#[tauri::command]
+async fn set_realtime(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: String, on: bool) -> Result<Snapshot, String> {
+    guard(&webview, &state)?;
+    change_account(&app, &id, |accounts, i| accounts[i].realtime = on)?;
+    let account = state.inner.lock().unwrap().accounts.iter().find(|a| a.id == id).cloned().ok_or("unknown account")?;
+    if let Some(w) = app.get_webview(&webview_label(&id)) {
+        let _ = w.close();
+    }
+    let window = app.get_window("main").ok_or("no window")?;
+    let (profiles, reopen_app) = (state.profiles.clone(), app.clone());
+    std::thread::spawn(move || {
+        // The old browser lets go of the profile a moment after closing.
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(500));
+            if reopen_app.get_webview(&webview_label(&account.id)).is_none()
+                && create_account_webview(&reopen_app, &window, &account, &profiles).is_ok()
+            {
+                layout(&reopen_app);
+                return;
+            }
+        }
+        eprintln!("could not reopen {}", account.label);
+    });
+    Ok(snapshot(&app))
 }
 
 /// Name and icon color; an empty color goes back to the brand color.
@@ -766,8 +836,36 @@ fn clear_recent(app: AppHandle, webview: Webview, state: State<'_, AppState>) ->
 /// a message for the dashboard and maybe show a notification, for the account
 /// whose webview is calling.
 #[tauri::command]
-fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32, title: String, body: String) -> Result<(), String> {
+fn notify(app: AppHandle, webview: Webview, id: u32, title: String, body: String) -> Result<(), String> {
     let account_id = webview.label().strip_prefix("acc-").ok_or("forbidden")?.to_string();
+    deliver(&app, account_id, id, &title, &body)
+}
+
+/// Some pages don't notify (Web Push, which WebView2 lacks, or their own setting
+/// is off). If an account's unread count went up and its page sent nothing
+/// within a few seconds, a plain notice goes out instead.
+fn notice_if_silent(app: &AppHandle, account_id: String, since: u128) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(6));
+        let state = app.state::<AppState>();
+        let silent = {
+            let inner = state.inner.lock().unwrap();
+            let notified = inner.notify_log.get(&account_id).and_then(|log| log.back()).is_some_and(|&t| t >= since);
+            let looking = inner.focused && !inner.locked && !inner.overlay && inner.active.as_deref() == Some(&account_id);
+            !notified && !looking
+        };
+        if silent {
+            let _ = deliver(&app, account_id, 0, "New message", "");
+        }
+    });
+}
+
+/// Records a message for the dashboard and shows a notification unless muted,
+/// in Do Not Disturb, or you're looking at that account. `id` is the page's
+/// notification id (0 for none), used to open that chat when clicked.
+fn deliver(app: &AppHandle, account_id: String, id: u32, title: &str, body: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
     let (enabled, preview) = {
         let s = state.settings.lock().unwrap();
         (s.notifications && !s.dnd_active(), s.notification_preview)
@@ -786,14 +884,14 @@ fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32,
         log.push_back(now);
         // The dashboard lists it even when muted or in Do Not Disturb, so you
         // can see what you missed.
-        let (recent_title, recent_body) = if preview { (short(&title, 100), short(&body, 300)) } else { Default::default() };
+        let (recent_title, recent_body) = if preview { (short(title, 100), short(body, 300)) } else { Default::default() };
         inner.recent.push_front(Recent { account: account_id.clone(), id, title: recent_title, body: recent_body, at: now_secs() });
         inner.recent.truncate(RECENT_MAX);
         // No pop-up while you're looking at that account.
         let looking = inner.focused && !inner.locked && !inner.overlay && inner.active.as_deref() == Some(&account_id);
         (label, inner.locked, enabled && !muted && !looking)
     };
-    refresh_shell(&app);
+    refresh_shell(app);
     if !show {
         return Ok(());
     }
@@ -801,10 +899,10 @@ fn notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: u32,
     let (title, body) = if locked || !preview {
         (label, "New message".to_string())
     } else {
-        (format!("{} · {}", short(&title, 100), label), short(&body, 300))
+        (format!("{} · {}", short(title, 100), label), short(body, 300))
     };
     let click_app = app.clone();
-    system::toast(&system::app_id(&app.config().identifier), &title, &body, move || {
+    system::toast(&app.config().identifier, &title, &body, move || {
         open_message(&click_app, &account_id, id)
     })
 }
@@ -814,7 +912,7 @@ fn on_panic_shortcut(app: &AppHandle) {
     let showing = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
     if showing {
         lock_app(app);
-        let _ = window.hide();
+        hide_window(app);
     } else {
         show_window(app);
     }
@@ -855,6 +953,7 @@ pub fn run() {
             install_update,
             open_recent,
             clear_recent,
+            set_realtime,
             notify
         ])
         .on_menu_event(|app, event| menus::on_menu_event(app, event.id().as_ref()))
@@ -862,7 +961,15 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             let accounts_file = config_dir.join("accounts.json");
             let settings_file = config_dir.join("settings.json");
-            let profiles = app.path().app_local_data_dir()?.join("profiles");
+            let data_dir = app.path().app_local_data_dir()?;
+            let profiles = data_dir.join("profiles");
+            // Notifications show the app's name and icon (see system::register_app_id).
+            let icon = data_dir.join("notification-icon.png");
+            if std::fs::create_dir_all(&data_dir).and_then(|_| std::fs::write(&icon, include_bytes!("../icons/128x128.png"))).is_ok() {
+                if let Err(e) = system::register_app_id(&app.config().identifier, "Master Chat", &icon) {
+                    eprintln!("could not register for notifications: {e}");
+                }
+            }
             let accounts = accounts::load(&accounts_file);
             let settings = settings::load(&settings_file);
             let active = accounts.first().map(|a| a.id.clone());
@@ -884,6 +991,7 @@ pub fn run() {
                     notify_log: HashMap::new(),
                     low_memory: HashMap::new(),
                     recent: VecDeque::new(),
+                    loaded_at: HashMap::new(),
                 }),
                 settings: Mutex::new(settings),
                 accounts_file,
@@ -917,22 +1025,20 @@ pub fn run() {
 
             // The account on screen loads first; the rest follow a few seconds apart,
             // since each is a whole browser starting up, so the window stays usable.
+            // All are created after setup: a webview made during setup never gets
+            // later show/hide calls, so it would stay "visible" to its page (which
+            // then holds back notifications and may mark messages as read).
             let (first, rest): (Vec<_>, Vec<_>) = accounts.into_iter().partition(|a| Some(&a.id) == active.as_ref());
-            for account in &first {
-                if let Err(e) = create_account_webview(&handle, &window, account, &profiles) {
-                    eprintln!("could not open {}: {e}", account.label);
-                }
-            }
-            layout(&handle);
             let (later_app, later_window, later_profiles) = (handle.clone(), window.clone(), profiles.clone());
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_secs(3));
-                for account in rest {
+                for (i, account) in first.into_iter().chain(rest).enumerate() {
+                    if i > 0 {
+                        std::thread::sleep(Duration::from_secs(if i == 1 { 3 } else { 4 }));
+                    }
                     if let Err(e) = create_account_webview(&later_app, &later_window, &account, &later_profiles) {
                         eprintln!("could not open {}: {e}", account.label);
                     }
                     layout(&later_app);
-                    std::thread::sleep(Duration::from_secs(4));
                 }
             });
 
@@ -977,9 +1083,7 @@ pub fn run() {
                 }
                 WindowEvent::CloseRequested { api, .. } if events_app.state::<AppState>().settings.lock().unwrap().close_to_tray => {
                     api.prevent_close();
-                    if let Some(w) = events_app.get_window("main") {
-                        let _ = w.hide();
-                    }
+                    hide_window(&events_app);
                 }
                 _ => {}
             });

@@ -18,6 +18,11 @@ pub struct Account {
     /// Messenger: don't let people see that you're typing.
     #[serde(default)]
     pub block_typing: bool,
+    /// Kept fully awake while hidden, so messages arrive and notify at once.
+    /// Otherwise the page may idle (timers slowed to once a minute) to save
+    /// memory and power.
+    #[serde(default = "yes")]
+    pub realtime: bool,
 }
 
 fn one() -> f64 {
@@ -30,7 +35,9 @@ fn yes() -> bool {
 
 impl Account {
     pub fn new(id: String, service: String, label: String) -> Self {
-        Account { id, service, label, color: None, zoom: 1.0, notify: true, block_typing: false }
+        // Gemini has no messages to wait for.
+        let realtime = service != "gemini";
+        Account { id, service, label, color: None, zoom: 1.0, notify: true, block_typing: false, realtime }
     }
 }
 

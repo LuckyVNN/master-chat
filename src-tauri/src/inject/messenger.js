@@ -198,6 +198,43 @@
     }
     return false;
   };
+  // Facebook sends its message notifications by Web Push, which WebView2 lacks,
+  // so the page shows none. Instead, when an unread chat's preview changes, this
+  // raises one (through notify.js) with the chat's name and preview; clicking it
+  // opens the chat. Rows are read the way screen readers get them: the visible
+  // texts are the name, the preview, "·" and the time.
+  const notified = new Map();
+  // The list fills in over a few seconds; unread chats seen by then are old news.
+  let quietUntil = 0;
+  const describeRow = (row) => {
+    const texts = [];
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent.trim();
+      const box = node.parentElement.getBoundingClientRect();
+      if (text && box.width > 1 && box.height > 1) texts.push(text);
+    }
+    const [name = "", ...rest] = texts;
+    const dot = rest.lastIndexOf("·");
+    const preview = (dot > 0 ? rest.slice(0, dot) : rest).filter((t) => t !== "·").join(" ");
+    return { name, preview };
+  };
+  const announce = (rows) => {
+    for (const row of rows) {
+      const href = row.getAttribute("href");
+      const { name, preview } = describeRow(row);
+      if (!href || !name || notified.get(href) === preview) continue;
+      notified.set(href, preview);
+      if (Date.now() < quietUntil) continue;
+      const notification = new Notification(name, { body: preview });
+      notification.onclick = () => {
+        const link = [...document.querySelectorAll('[role="grid"] [role="row"] a[href]')].find((a) => a.getAttribute("href") === href);
+        if (link) link.click();
+        else location.assign(href);
+      };
+    }
+  };
+
   // Reading the list lays the page out, so it is read again only after it changed.
   let watchedList = null;
   let listChanged = true;
@@ -214,7 +251,10 @@
     if (listChanged) {
       listChanged = false;
       const rows = [...document.querySelectorAll('[role="grid"] [role="row"] a[href*="/messages/"]')];
-      unread = rows.filter((row) => row.getBoundingClientRect().width > 0 && isUnreadRow(row)).length;
+      const unreadRows = rows.filter((row) => row.getBoundingClientRect().width > 0 && isUnreadRow(row));
+      unread = unreadRows.length;
+      if (rows.length && !quietUntil) quietUntil = Date.now() + 10000;
+      if (rows.length) announce(unreadRows);
     }
     // Also puts the title back if Facebook rewrote the <title> element itself.
     applyTitle();

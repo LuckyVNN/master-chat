@@ -91,13 +91,33 @@ function renderDashboard() {
       const count = a.unread
         ? [el("b", { textContent: a.unread > 999 ? "999+" : a.unread }), el("small", { textContent: "unread" })]
         : [el("span", { className: "done", textContent: "Up to date" })];
-      return el("button", { className: "card", style: `--c:${colorOf(a)}`, onclick: () => select(a.id) }, [
-        logo(svc.id, colorOf(a), "dot"),
-        el("span", { className: "who" }, [
-          el("b", { textContent: a.label }),
-          el("small", { textContent: svc.name + (a.notify ? "" : " · muted") }),
+      const realtime = el("input", {
+        type: "checkbox",
+        checked: a.realtime,
+        onchange: async (e) => {
+          e.target.disabled = true;
+          setState(await invoke("set_realtime", { id: a.id, on: e.target.checked }).catch(() => invoke("list_accounts")));
+        },
+      });
+      return el("div", { className: "card", style: `--c:${colorOf(a)}` }, [
+        el("button", { className: "open", onclick: () => select(a.id) }, [
+          logo(svc.id, colorOf(a), "dot"),
+          el("span", { className: "who" }, [
+            el("b", { textContent: a.label }),
+            el("small", { textContent: svc.name + (a.notify ? "" : " · muted") }),
+          ]),
+          el("span", { className: "count" }, count),
         ]),
-        el("span", { className: "count" }, count),
+        el(
+          "label",
+          {
+            className: "realtime",
+            title: a.realtime
+              ? "Stays fully awake while hidden, so new messages notify at once."
+              : "May idle while hidden to save memory and power; new messages can show up minutes late.",
+          },
+          [realtime, el("span", { textContent: a.realtime ? "Real-time" : "Real-time (off: may be late)" })]
+        ),
       ]);
     })
   );

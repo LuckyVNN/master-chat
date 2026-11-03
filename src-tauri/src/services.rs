@@ -23,6 +23,10 @@ pub struct Service {
     /// Script run at document start in the service's main frame, to restyle it.
     #[serde(skip)]
     pub inject: Option<&'static str>,
+    /// Its script raises notifications itself, describing each new message, so
+    /// the app adds no plain notice when the unread count rises.
+    #[serde(skip)]
+    pub describes_messages: bool,
 }
 
 pub const SERVICES: &[Service] = &[
@@ -34,7 +38,8 @@ pub const SERVICES: &[Service] = &[
         domains: crate::google_domains::GOOGLE_DOMAINS,
         sign_in_hosts: &["accounts.google.com"],
         popup_paths: None,
-        inject: None,
+        inject: Some(include_str!("inject/gmail.js")),
+        describes_messages: true,
     },
     Service {
         id: "outlook",
@@ -55,6 +60,7 @@ pub const SERVICES: &[Service] = &[
         sign_in_hosts: &["login.microsoftonline.com", "login.live.com"],
         popup_paths: None,
         inject: Some(include_str!("inject/outlook.js")),
+        describes_messages: false,
     },
     Service {
         id: "messenger",
@@ -65,6 +71,7 @@ pub const SERVICES: &[Service] = &[
         sign_in_hosts: &[],
         popup_paths: Some(&["/groupcall", "/videocall", "/messenger_media"]),
         inject: Some(include_str!("inject/messenger.js")),
+        describes_messages: true,
     },
     Service {
         id: "zalo",
@@ -75,6 +82,7 @@ pub const SERVICES: &[Service] = &[
         sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
+        describes_messages: false,
     },
     Service {
         id: "whatsapp",
@@ -85,6 +93,7 @@ pub const SERVICES: &[Service] = &[
         sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
+        describes_messages: false,
     },
     Service {
         id: "telegram",
@@ -95,6 +104,7 @@ pub const SERVICES: &[Service] = &[
         sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
+        describes_messages: false,
     },
     Service {
         id: "discord",
@@ -105,6 +115,7 @@ pub const SERVICES: &[Service] = &[
         sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
+        describes_messages: false,
     },
     Service {
         id: "gemini",
@@ -116,6 +127,7 @@ pub const SERVICES: &[Service] = &[
         // Sources and search results it links to open in the browser.
         popup_paths: Some(&[]),
         inject: None,
+        describes_messages: false,
     },
 ];
 

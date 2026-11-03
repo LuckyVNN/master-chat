@@ -47,14 +47,15 @@ mod imp {
             .map_err(|e| e.to_string())
     }
 
-    /// The installer registers the app under its identifier; a dev build isn't
-    /// installed, so its notifications show as coming from PowerShell.
-    pub fn app_id(identifier: &str) -> String {
-        if cfg!(debug_assertions) {
-            Toast::POWERSHELL_APP_ID.to_string()
-        } else {
-            identifier.to_string()
-        }
+    /// Notifications are shown under the app's identifier. Windows takes the
+    /// name and icon they show from this per-user registry entry, so the app
+    /// needs no Start menu shortcut for them (and a dev build isn't "PowerShell").
+    pub fn register_app_id(app_id: &str, name: &str, icon: &std::path::Path) -> Result<(), String> {
+        let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
+            .create_subkey(format!(r"Software\Classes\AppUserModelId\{app_id}"))
+            .map_err(|e| e.to_string())?;
+        key.set_value("DisplayName", &name).map_err(|e| e.to_string())?;
+        key.set_value("IconUri", &icon.display().to_string()).map_err(|e| e.to_string())
     }
 
     /// Asks WebView2 to keep a page that's off screen small: it keeps running
@@ -84,8 +85,8 @@ mod imp {
     pub fn toast(_app_id: &str, _title: &str, _body: &str, _on_click: impl Fn() + Send + 'static) -> Result<(), String> {
         Ok(())
     }
-    pub fn app_id(identifier: &str) -> String {
-        identifier.to_string()
+    pub fn register_app_id(_app_id: &str, _name: &str, _icon: &std::path::Path) -> Result<(), String> {
+        Ok(())
     }
     pub fn set_low_memory(_webview: &tauri::Webview, _low: bool) {}
 }

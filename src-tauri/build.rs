@@ -25,6 +25,7 @@ fn main() {
             "install_update",
             "open_recent",
             "clear_recent",
+            "set_realtime",
             "notify",
         ]),
     ))

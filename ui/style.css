@@ -217,15 +217,34 @@ body.labels #accounts { gap: 6px; }
 .dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .card {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
+  flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--bg);
-  text-align: left;
+  overflow: hidden;
 }
 .card:hover { border-color: var(--c); }
+.card .open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.card .realtime {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 9px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.card .realtime input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.card .realtime:has(input:checked) { color: var(--text); }
 .card .dot { width: 38px; height: 38px; flex: none; border-radius: 11px; background: var(--c); }
 .card .who { flex: 1; min-width: 0; }
 .card .who b, .card .who small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -260,3 +279,4 @@ body.labels #accounts { gap: 6px; }
 #dash-recent .msg span { color: var(--muted); font-size: 13px; }
 #dash-recent .meta { flex: none; color: var(--muted); font-size: 12px; text-align: right; max-width: 34%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #dash-empty { margin: 10px 0 0; }
+.dash-hint { margin: 10px 0 0 !important; font-size: 12px; }

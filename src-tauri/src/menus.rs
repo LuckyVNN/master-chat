@@ -135,6 +135,7 @@ fn on_account_action(app: &AppHandle, action: &str, id: &str) {
     match action {
         "reload" => {
             if let Some(w) = app.get_webview(&crate::webview_label(id)) {
+                state.inner.lock().unwrap().loaded_at.insert(id.to_string(), crate::now_millis());
                 let _ = w.reload();
             }
         }

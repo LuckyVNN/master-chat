@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-realtime"
+description = "Enables the set_realtime command without any pre-configured scope."
+commands.allow = ["set_realtime"]
+
+[[permission]]
+identifier = "deny-set-realtime"
+description = "Denies the set_realtime command without any pre-configured scope."
+commands.deny = ["set_realtime"]
