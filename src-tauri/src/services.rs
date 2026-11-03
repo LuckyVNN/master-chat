@@ -11,6 +11,11 @@ pub struct Service {
     /// subdomains are allowed too. Anything else opens in the system browser.
     #[serde(skip)]
     pub domains: &'static [&'static str],
+    /// The service's sign-in pages (exact hosts). A school or work account may be
+    /// sent from them to its organization's own login page on any domain; that
+    /// page may load in the app until sign-in comes back to the service.
+    #[serde(skip)]
+    pub sign_in_hosts: &'static [&'static str],
     /// When set, new windows (target=_blank, window.open) stay in the app only for
     /// these paths; every other link opens in the system browser.
     #[serde(skip)]
@@ -26,7 +31,8 @@ pub const SERVICES: &[Service] = &[
         name: "Gmail",
         url: "https://mail.google.com/mail/",
         color: "#ea4335",
-        domains: crate::google_domains::GMAIL_DOMAINS,
+        domains: crate::google_domains::GOOGLE_DOMAINS,
+        sign_in_hosts: &["accounts.google.com"],
         popup_paths: None,
         inject: None,
     },
@@ -46,6 +52,7 @@ pub const SERVICES: &[Service] = &[
             "msauth.net",
             "msftauth.net",
         ],
+        sign_in_hosts: &["login.microsoftonline.com", "login.live.com"],
         popup_paths: None,
         inject: Some(include_str!("inject/outlook.js")),
     },
@@ -55,6 +62,7 @@ pub const SERVICES: &[Service] = &[
         url: "https://www.facebook.com/messages/",
         color: "#a033ff",
         domains: &["facebook.com", "messenger.com", "fbcdn.net", "fbsbx.com"],
+        sign_in_hosts: &[],
         popup_paths: Some(&["/groupcall", "/videocall", "/messenger_media"]),
         inject: Some(include_str!("inject/messenger.js")),
     },
@@ -64,6 +72,7 @@ pub const SERVICES: &[Service] = &[
         url: "https://chat.zalo.me/",
         color: "#0068ff",
         domains: &["zalo.me", "zaloapp.com", "zdn.vn"],
+        sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
     },
@@ -73,6 +82,7 @@ pub const SERVICES: &[Service] = &[
         url: "https://web.whatsapp.com/",
         color: "#25d366",
         domains: &["whatsapp.com", "whatsapp.net"],
+        sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
     },
@@ -82,6 +92,7 @@ pub const SERVICES: &[Service] = &[
         url: "https://web.telegram.org/a/",
         color: "#29a9eb",
         domains: &["telegram.org", "t.me"],
+        sign_in_hosts: &[],
         popup_paths: None,
         inject: None,
     },
@@ -91,7 +102,19 @@ pub const SERVICES: &[Service] = &[
         url: "https://discord.com/app",
         color: "#5865f2",
         domains: &["discord.com", "discordapp.com", "discord.gg", "hcaptcha.com"],
+        sign_in_hosts: &[],
         popup_paths: None,
+        inject: None,
+    },
+    Service {
+        id: "gemini",
+        name: "Gemini",
+        url: "https://gemini.google.com/app",
+        color: "#8e75b2",
+        domains: crate::google_domains::GOOGLE_DOMAINS,
+        sign_in_hosts: &["accounts.google.com"],
+        // Sources and search results it links to open in the browser.
+        popup_paths: Some(&[]),
         inject: None,
     },
 ];
@@ -117,6 +140,10 @@ impl Service {
 }
 
 impl Service {
+    pub fn is_sign_in(&self, url: &Url) -> bool {
+        url.scheme() == "https" && url.host_str().is_some_and(|host| self.sign_in_hosts.contains(&host))
+    }
+
     /// New windows stay in the app only on the service's domains and, if it
     /// limits them, on its popup paths (calls, the photo viewer).
     pub fn allows_popup(&self, url: &Url) -> bool {
@@ -159,6 +186,9 @@ mod tests {
         assert!(messenger.allows_popup(&Url::parse("https://www.facebook.com/groupcall/ROOM:123").unwrap()));
         assert!(!messenger.allows_popup(&Url::parse("https://www.facebook.com/reel/123").unwrap()));
         assert!(gmail.allows_popup(&Url::parse("https://accounts.google.com/").unwrap()));
+        assert!(gmail.is_sign_in(&Url::parse("https://accounts.google.com/v3/signin").unwrap()));
+        assert!(!gmail.is_sign_in(&Url::parse("https://mail.google.com/").unwrap()));
+        assert!(!messenger.is_sign_in(&Url::parse("https://www.facebook.com/login").unwrap()));
     }
 
     #[test]

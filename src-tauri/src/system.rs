@@ -56,6 +56,21 @@ mod imp {
             identifier.to_string()
         }
     }
+
+    /// Asks WebView2 to keep a page that's off screen small: it keeps running
+    /// (notifications, unread counts) but gives back memory it can spare.
+    pub fn set_low_memory(webview: &tauri::Webview, low: bool) {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+        };
+        use windows_core::Interface;
+        let level = if low { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+        let _ = webview.with_webview(move |platform| unsafe {
+            if let Ok(core) = platform.controller().CoreWebView2().and_then(|c| c.cast::<ICoreWebView2_19>()) {
+                let _ = core.SetMemoryUsageTargetLevel(level);
+            }
+        });
+    }
 }
 
 #[cfg(not(windows))]
@@ -72,6 +87,7 @@ mod imp {
     pub fn app_id(identifier: &str) -> String {
         identifier.to_string()
     }
+    pub fn set_low_memory(_webview: &tauri::Webview, _low: bool) {}
 }
 
 pub use imp::*;

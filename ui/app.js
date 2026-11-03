@@ -317,10 +317,12 @@ accountList.addEventListener("pointerdown", (e) => {
   const slot = e.target.closest(".slot");
   if (!slot || e.button !== 0) return;
   drag = { slot, startY: e.clientY, moved: false };
-  slot.setPointerCapture(e.pointerId);
 });
 accountList.addEventListener("pointermove", (e) => {
   if (!drag || (!drag.moved && Math.abs(e.clientY - drag.startY) < 6)) return;
+  // Capture only once it's a drag: capturing on press would send the click to
+  // the slot instead of the account's button.
+  if (!drag.moved) drag.slot.setPointerCapture(e.pointerId);
   drag.moved = true;
   drag.slot.classList.add("dragging");
   const others = [...accountList.children].filter((s) => s !== drag.slot);
@@ -342,8 +344,9 @@ const endDrag = async () => {
   const ids = [...accountList.children].map((s) => s.dataset.id);
   setState(await invoke("reorder_accounts", { ids }).catch(() => invoke("list_accounts")));
 };
-accountList.addEventListener("pointerup", endDrag);
-accountList.addEventListener("pointercancel", endDrag);
+// On the window: a press can be released outside the list before it's a drag.
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", endDrag);
 
 // The shell is an app, not a page: no browser menu on right-click.
 document.addEventListener("contextmenu", (e) => {

@@ -1,6 +1,6 @@
 // Google's own domains, from https://www.google.com/supported_domains (fetched 2026-11-03).
-// Sign-in also sets cookies on the country domain (e.g. google.com.vn), so Gmail needs all of them.
-pub const GMAIL_DOMAINS: &[&str] = &[
+// Sign-in also sets cookies on the country domain (e.g. google.com.vn), so Gmail and Gemini need all of them.
+pub const GOOGLE_DOMAINS: &[&str] = &[
     "youtube.com",
     "googleusercontent.com",
     "gstatic.com",

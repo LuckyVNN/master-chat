@@ -32,3 +32,5 @@ strip = true
 tauri-winrt-notification = "0.8.1"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
 winreg = "0.56.0"
+webview2-com = "0.39.1"
+windows-core = "0.62.2"

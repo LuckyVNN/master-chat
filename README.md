@@ -1,7 +1,7 @@
 # Master Chat
 
 One small, locked-down desktop app for Gmail, Outlook, Messenger, Zalo, WhatsApp,
-Telegram and Discord. Built with Tauri v2 and the system's own web view (WebView2 on
+Telegram, Discord and Gemini. Built with Tauri v2 and the system's own web view (WebView2 on
 Windows), with plain HTML/CSS/JS for the sidebar: no framework and no bundler.
 
 ## Features
@@ -33,7 +33,10 @@ Windows), with plain HTML/CSS/JS for the sidebar: no framework and no bundler.
   `notify` (`capabilities/services.json`), which checks which account is calling and
   rate-limits it. Every command also checks its caller in code.
 - **Navigation allowlist.** Each service's webview may only load HTTPS pages on its own
-  domains (`src-tauri/src/services.rs`); everything else opens in your browser.
+  domains (`src-tauri/src/services.rs`); everything else opens in your browser. The one
+  exception is sign-in for school and work accounts: when Google's or Microsoft's sign-in
+  page sends you to your organization's own login page, that page loads in the app until
+  sign-in returns to the service. Such pages can't call the app at all.
 - **You sign in on the services' own pages.** The app never sees passwords, has no
   server and sends no analytics.
 - **The PIN** is stored only as a salted PBKDF2-SHA256 hash (300,000 rounds); wrong

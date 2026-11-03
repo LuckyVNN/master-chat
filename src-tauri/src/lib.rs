@@ -13,8 +13,11 @@ use serde::Serialize;
 use settings::{Settings, SettingsUpdate, SettingsView};
 use std::{
     collections::{HashMap, VecDeque},
-    path::PathBuf,
-    sync::Mutex,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
@@ -48,6 +51,8 @@ pub(crate) struct Inner {
     unlock_retry_at: u64,
     focused: bool,
     notify_log: HashMap<String, VecDeque<u128>>,
+    /// Which account webviews were last asked to use little memory.
+    low_memory: HashMap<String, bool>,
 }
 
 pub(crate) struct AppState {
@@ -167,19 +172,30 @@ fn layout(app: &AppHandle) {
         let _ = shell.set_size(size);
     }
 
-    // Collect first so no webview call runs while the lock is held.
-    let visible: Vec<(String, bool)> = {
+    // Collect first so no webview call runs while the lock is held. The memory
+    // level is only sent when it changes, not on every resize.
+    let visible: Vec<(String, bool, bool)> = {
         let state = app.state::<AppState>();
-        let inner = state.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
         let hidden = inner.overlay || inner.locked;
-        inner
+        let shown: Vec<(String, bool)> = inner
             .accounts
             .iter()
-            .map(|a| (webview_label(&a.id), !hidden && inner.active.as_deref() == Some(&a.id)))
+            .map(|a| (a.id.clone(), !hidden && inner.active.as_deref() == Some(&a.id)))
+            .collect();
+        shown
+            .into_iter()
+            .map(|(id, show)| {
+                let changed = inner.low_memory.insert(id.clone(), !show) != Some(!show);
+                (webview_label(&id), show, changed)
+            })
             .collect()
     };
-    for (label, show) in visible {
+    for (label, show, memory_changed) in visible {
         let Some(webview) = app.get_webview(&label) else { continue };
+        if memory_changed {
+            system::set_low_memory(&webview, !show);
+        }
         if show {
             let _ = webview.set_position(LogicalPosition::new(SIDEBAR, 0.0));
             let _ = webview.set_size(LogicalSize::new((size.width - SIDEBAR).max(1.0), size.height));
@@ -318,17 +334,27 @@ fn page_script(service: &services::Service, account: &Account) -> String {
 }
 
 /// Each account gets its own browser profile folder, so cookies and logins never mix.
-fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, profiles: &PathBuf) -> Result<(), String> {
+/// The webview starts outside the window and unfocused, so one loading in the
+/// background never flashes over the lock screen or takes the keyboard; `layout`
+/// then shows it if it's the active account.
+fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, profiles: &Path) -> Result<(), String> {
     let service = services::find(&account.service).ok_or("unknown service")?;
     let url = Url::parse(service.url).map_err(|e| e.to_string())?;
     let id = account.id.clone();
     let title_app = app.clone();
+    // True from the service's sign-in page until sign-in returns to the service:
+    // meanwhile an organization's own login page (any HTTPS site) may load.
+    let signing_in = Arc::new(AtomicBool::new(false));
 
     let builder = WebviewBuilder::new(webview_label(&account.id), WebviewUrl::External(url))
         .data_directory(accounts::profile_dir(profiles, &account.id))
         .initialization_script(page_script(service, account))
+        .focused(false)
         .on_navigation(move |url| {
             if service.allows(url) {
+                signing_in.store(service.is_sign_in(url), Ordering::Relaxed);
+                true
+            } else if url.scheme() == "https" && signing_in.load(Ordering::Relaxed) {
                 true
             } else {
                 open_external(url);
@@ -349,9 +375,11 @@ fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, p
         });
 
     let webview = window
-        .add_child(builder, LogicalPosition::new(SIDEBAR, 0.0), LogicalSize::new(800.0, 600.0))
+        .add_child(builder, LogicalPosition::new(-20000.0, 0.0), LogicalSize::new(800.0, 600.0))
         .map_err(|e| e.to_string())?;
     let _ = webview.set_zoom(account.zoom);
+    // The next layout sets this webview's memory level, whatever it recorded before it existed.
+    app.state::<AppState>().inner.lock().unwrap().low_memory.remove(&account.id);
     Ok(())
 }
 
@@ -393,7 +421,7 @@ async fn add_account(
     }
     let window = app.get_window("main").ok_or("no window")?;
     create_account_webview(&app, &window, &account, &state.profiles)?;
-    layout(&app);
+    select(&app, &account.id);
     Ok(snapshot(&app))
 }
 
@@ -427,7 +455,11 @@ async fn remove_account(app: AppHandle, webview: Webview, state: State<'_, AppSt
         }
     });
     set_unread(&app, &id, 0);
-    state.inner.lock().unwrap().unread.remove(&id);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.unread.remove(&id);
+        inner.low_memory.remove(&id);
+    }
     layout(&app);
     Ok(snapshot(&app))
 }
@@ -802,6 +834,7 @@ pub fn run() {
                     unlock_retry_at: 0,
                     focused: true,
                     notify_log: HashMap::new(),
+                    low_memory: HashMap::new(),
                 }),
                 settings: Mutex::new(settings),
                 accounts_file,
@@ -833,8 +866,8 @@ pub fn run() {
             });
             window.add_child(shell, LogicalPosition::new(0.0, 0.0), size)?;
 
-            // The account on screen loads first; the rest follow a little later,
-            // one at a time, so the window is usable at once.
+            // The account on screen loads first; the rest follow a few seconds apart,
+            // since each is a whole browser starting up, so the window stays usable.
             let (first, rest): (Vec<_>, Vec<_>) = accounts.into_iter().partition(|a| Some(&a.id) == active.as_ref());
             for account in &first {
                 if let Err(e) = create_account_webview(&handle, &window, account, &profiles) {
@@ -844,13 +877,13 @@ pub fn run() {
             layout(&handle);
             let (later_app, later_window, later_profiles) = (handle.clone(), window.clone(), profiles.clone());
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_secs(2));
+                std::thread::sleep(Duration::from_secs(3));
                 for account in rest {
                     if let Err(e) = create_account_webview(&later_app, &later_window, &account, &later_profiles) {
                         eprintln!("could not open {}: {e}", account.label);
                     }
                     layout(&later_app);
-                    std::thread::sleep(Duration::from_millis(800));
+                    std::thread::sleep(Duration::from_secs(4));
                 }
             });
 
@@ -893,12 +926,10 @@ pub fn run() {
                 WindowEvent::Focused(focused) => {
                     events_app.state::<AppState>().inner.lock().unwrap().focused = *focused;
                 }
-                WindowEvent::CloseRequested { api, .. } => {
-                    if events_app.state::<AppState>().settings.lock().unwrap().close_to_tray {
-                        api.prevent_close();
-                        if let Some(w) = events_app.get_window("main") {
-                            let _ = w.hide();
-                        }
+                WindowEvent::CloseRequested { api, .. } if events_app.state::<AppState>().settings.lock().unwrap().close_to_tray => {
+                    api.prevent_close();
+                    if let Some(w) = events_app.get_window("main") {
+                        let _ = w.hide();
                     }
                 }
                 _ => {}
