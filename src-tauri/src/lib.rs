@@ -424,11 +424,13 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
     let title_app = app.clone();
     let title_label = label.clone();
     let mut builder = tauri::WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url.clone()))
-        .title(format!("{} · {}", service.name, account.label))
+        .title(service.name)
         .inner_size(400.0, 620.0)
         .min_inner_size(300.0, 360.0)
         .position(x, y)
         .always_on_top(true)
+        // Its button is in the app's chat bar, not on the Windows taskbar.
+        .skip_taskbar(true)
         .data_directory(accounts::profile_dir(&state.profiles, &account.id))
         .initialization_script(page_script(service, &account, true))
         .on_navigation(move |url| {
@@ -447,13 +449,15 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
                 NewWindowResponse::Deny
             }
         })
-        .on_document_title_changed(move |_window, title| {
+        .on_document_title_changed(move |window, title| {
             {
                 let state = title_app.state::<AppState>();
                 let mut inner = state.inner.lock().unwrap();
                 let Some(pop) = inner.pops.iter_mut().find(|p| p.label == title_label) else { return };
-                pop.title = title;
+                pop.title = title.clone();
             }
+            // The page's title is the person's name (or the channel's).
+            let _ = window.set_title(&title);
             refresh_shell(&title_app);
         });
     // The same browser options as the account's page, as they share its profile.
@@ -463,12 +467,19 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
     let window = builder.build().map_err(|e| e.to_string())?;
     state.inner.lock().unwrap().pops.push(Pop { label: label.clone(), account: account.id.clone(), title: String::new(), url: url.to_string() });
     let closed_app = app.clone();
-    window.on_window_event(move |event| {
-        if let WindowEvent::Destroyed = event {
+    let tuck = window.clone();
+    window.on_window_event(move |event| match event {
+        WindowEvent::Destroyed => {
             closed_app.state::<AppState>().inner.lock().unwrap().pops.retain(|p| p.label != label);
             layout(&closed_app);
             refresh_shell(&closed_app);
         }
+        // Minimizing tucks the chat into the chat bar; its chip brings it back.
+        WindowEvent::Resized(_) if tuck.is_minimized().unwrap_or(false) => {
+            let _ = tuck.hide();
+            let _ = tuck.unminimize();
+        }
+        _ => {}
     });
     layout(app);
     refresh_shell(app);
@@ -481,9 +492,9 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
 fn toggle_pop(webview: Webview, state: State<'_, AppState>, app: AppHandle, label: String) -> Result<(), String> {
     guard(&webview, &state)?;
     let window = pop_window(&app, &label).ok_or("no such chat")?;
-    let in_front = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false) && window.is_focused().unwrap_or(false);
+    let in_front = window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false);
     if in_front {
-        window.minimize().map_err(|e| e.to_string())
+        window.hide().map_err(|e| e.to_string())
     } else {
         let _ = window.show();
         let _ = window.unminimize();

@@ -96,7 +96,8 @@
     html[${CHATS}] [role="dialog"], html[${CHATS}] [role="dialog"] * { --header-height: 56px !important; }
     /* The chat list's edge can be dragged to resize it. */
     [${LIST}] { position: relative; }
-    html[${POP}] [${LIST}], html[${POP}] .mc-pane-edge { display: none !important; }
+    /* A popped-out chat is narrow: Facebook shows just the conversation then. */
+    html[${POP}] .mc-pane-edge { display: none !important; }
     .mc-pane-edge { position: absolute; top: 0; bottom: 0; right: -6px; width: 9px; z-index: 5; cursor: col-resize; touch-action: none; }
     .mc-pane-edge::after {
       content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px;
