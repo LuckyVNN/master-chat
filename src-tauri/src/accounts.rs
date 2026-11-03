@@ -23,6 +23,9 @@ pub struct Account {
     /// memory and power.
     #[serde(default = "yes")]
     pub realtime: bool,
+    /// Its unread count isn't shown or added to the total (an inbox nobody empties).
+    #[serde(default)]
+    pub hide_unread: bool,
 }
 
 fn one() -> f64 {
@@ -37,7 +40,7 @@ impl Account {
     pub fn new(id: String, service: String, label: String) -> Self {
         // Gemini has no messages to wait for.
         let realtime = service != "gemini";
-        Account { id, service, label, color: None, zoom: 1.0, notify: true, block_typing: false, realtime }
+        Account { id, service, label, color: None, zoom: 1.0, notify: true, block_typing: false, realtime, hide_unread: false }
     }
 }
 

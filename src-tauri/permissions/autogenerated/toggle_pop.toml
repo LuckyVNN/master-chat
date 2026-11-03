@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-toggle-pop"
+description = "Enables the toggle_pop command without any pre-configured scope."
+commands.allow = ["toggle_pop"]
+
+[[permission]]
+identifier = "deny-toggle-pop"
+description = "Denies the toggle_pop command without any pre-configured scope."
+commands.deny = ["toggle_pop"]

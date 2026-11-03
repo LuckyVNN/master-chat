@@ -32,6 +32,8 @@ use tauri_plugin_updater::UpdaterExt;
 
 /// Width of the local sidebar; service webviews fill the rest of the window.
 const SIDEBAR: f64 = 68.0;
+/// Height of the bar along the bottom that lists popped-out chats, when there are any.
+const DOCK: f64 = 44.0;
 /// Label of the local UI webview, the only one allowed to manage the app.
 const SHELL: &str = "shell";
 /// Hides the window (and locks the app, if the lock is on) from anywhere.
@@ -65,6 +67,31 @@ pub(crate) struct Inner {
     /// When each account's page last started loading (ms): its unread count
     /// settles from 0 to the real number then, which isn't news.
     loaded_at: HashMap<String, u128>,
+    /// Chats popped out into windows of their own, in the order opened.
+    pops: Vec<Pop>,
+    pop_seq: u32,
+}
+
+/// A popped-out chat: a small window on one conversation, signed in through
+/// its account's browser profile.
+#[derive(Serialize, Clone)]
+struct Pop {
+    label: String,
+    account: String,
+    title: String,
+    #[serde(skip)]
+    url: String,
+}
+
+impl Inner {
+    /// The count the badges and totals show: none for an account set to hide it.
+    fn shown_unread(&self, account: &Account) -> u32 {
+        if account.hide_unread {
+            0
+        } else {
+            self.unread.get(&account.id).copied().unwrap_or(0)
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -95,6 +122,7 @@ struct AccountView {
     unread: u32,
     notify: bool,
     realtime: bool,
+    hide_unread: bool,
 }
 
 #[derive(Serialize)]
@@ -105,6 +133,7 @@ struct Snapshot {
     settings: SettingsView,
     version: String,
     recent: Vec<Recent>,
+    pops: Vec<Pop>,
 }
 
 pub(crate) fn now_secs() -> u64 {
@@ -162,9 +191,10 @@ fn snapshot(app: &AppHandle) -> Snapshot {
                 service: a.service.clone(),
                 label: a.label.clone(),
                 color: a.color.clone(),
-                unread: inner.unread.get(&a.id).copied().unwrap_or(0),
+                unread: inner.shown_unread(a),
                 notify: a.notify,
                 realtime: a.realtime,
+                hide_unread: a.hide_unread,
             })
             .collect()
     };
@@ -175,6 +205,7 @@ fn snapshot(app: &AppHandle) -> Snapshot {
         settings,
         version: app.package_info().version.to_string(),
         recent: if inner.locked { Vec::new() } else { inner.recent.iter().cloned().collect() },
+        pops: if inner.locked { Vec::new() } else { inner.pops.clone() },
     }
 }
 
@@ -203,16 +234,17 @@ fn layout(app: &AppHandle) {
 
     // Collect first so no webview call runs while the lock is held. The memory
     // level is only sent when it changes, not on every resize.
-    let visible: Vec<(String, bool, Option<bool>)> = {
+    let (dock, visible): (f64, Vec<(String, bool, Option<bool>)>) = {
         let state = app.state::<AppState>();
         let mut inner = state.inner.lock().unwrap();
+        let dock = if inner.pops.is_empty() || inner.locked { 0.0 } else { DOCK };
         let hidden = inner.overlay || inner.locked || !window_shown;
         let shown: Vec<(String, bool, bool)> = inner
             .accounts
             .iter()
             .map(|a| (a.id.clone(), !hidden && inner.active.as_deref() == Some(&a.id), a.realtime))
             .collect();
-        shown
+        let visible = shown
             .into_iter()
             .map(|(id, show, realtime)| {
                 // Real-time accounts keep their memory, so they answer at once.
@@ -220,7 +252,8 @@ fn layout(app: &AppHandle) {
                 let changed = inner.low_memory.insert(id.clone(), low) != Some(low);
                 (webview_label(&id), show, changed.then_some(low))
             })
-            .collect()
+            .collect();
+        (dock, visible)
     };
     for (label, show, memory) in visible {
         let Some(webview) = app.get_webview(&label) else { continue };
@@ -229,7 +262,7 @@ fn layout(app: &AppHandle) {
         }
         if show {
             let _ = webview.set_position(LogicalPosition::new(SIDEBAR, 0.0));
-            let _ = webview.set_size(LogicalSize::new((size.width - SIDEBAR).max(1.0), size.height));
+            let _ = webview.set_size(LogicalSize::new((size.width - SIDEBAR).max(1.0), (size.height - dock).max(1.0)));
             let _ = webview.show();
         } else {
             let _ = webview.hide();
@@ -242,7 +275,7 @@ fn show_total_unread(app: &AppHandle) {
     let total: u32 = {
         let state = app.state::<AppState>();
         let inner = state.inner.lock().unwrap();
-        inner.unread.values().sum()
+        inner.accounts.iter().map(|a| inner.shown_unread(a)).sum()
     };
     let title = if total > 0 { format!("Master Chat ({total})") } else { "Master Chat".into() };
     if let Some(window) = app.get_window("main") {
@@ -260,7 +293,7 @@ fn show_total_unread(app: &AppHandle) {
 }
 
 fn set_unread(app: &AppHandle, id: &str, count: u32) {
-    {
+    let shown = {
         let state = app.state::<AppState>();
         let mut inner = state.inner.lock().unwrap();
         if inner.unread.get(id) == Some(&count) {
@@ -278,10 +311,11 @@ fn set_unread(app: &AppHandle, id: &str, count: u32) {
         if rose && settled && !describes {
             notice_if_silent(app, id.to_string(), now);
         }
-    }
+        inner.accounts.iter().find(|a| a.id == id).map_or(0, |a| inner.shown_unread(a))
+    };
     show_total_unread(app);
     let id = serde_json::to_string(id).unwrap_or_default();
-    call_shell(app, format!("window.masterChat && window.masterChat.unread({id}, {count})"));
+    call_shell(app, format!("window.masterChat && window.masterChat.unread({id}, {shown})"));
 }
 
 pub(crate) fn show_window(app: &AppHandle) {
@@ -335,8 +369,132 @@ pub(crate) fn lock_app(app: &AppHandle) {
         return;
     }
     state.inner.lock().unwrap().locked = true;
+    hide_pops(app);
     layout(app);
     refresh_shell(app);
+}
+
+fn pop_window(app: &AppHandle, label: &str) -> Option<Window> {
+    label.starts_with("pop-").then(|| app.get_window(label)).flatten()
+}
+
+/// Popped-out chats hide with the app (lock, panic shortcut).
+fn hide_pops(app: &AppHandle) {
+    let labels: Vec<String> = app.state::<AppState>().inner.lock().unwrap().pops.iter().map(|p| p.label.clone()).collect();
+    for label in labels {
+        if let Some(w) = pop_window(app, &label) {
+            let _ = w.hide();
+        }
+    }
+}
+
+/// Opens the conversation an account is showing in a small window of its own,
+/// on top of other windows. It uses the account's browser profile (so it's
+/// signed in) and the same rules for where it may go.
+pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (account, n) = {
+        let mut inner = state.inner.lock().unwrap();
+        if inner.locked {
+            return Err("locked".into());
+        }
+        let account = inner.accounts.iter().find(|a| a.id == account_id).cloned().ok_or("unknown account")?;
+        inner.pop_seq += 1;
+        (account, inner.pop_seq)
+    };
+    let service = services::find(&account.service).ok_or("unknown service")?;
+    let url = app.get_webview(&webview_label(account_id)).ok_or("not open")?.url().map_err(|e| e.to_string())?;
+    if !service.is_chat(&url) {
+        return Err("open a conversation first".into());
+    }
+    if let Some(open) = state.inner.lock().unwrap().pops.iter().find(|p| p.account == account.id && p.url == url.as_str()) {
+        let _ = app.get_window(&open.label).map(|w| (w.show(), w.unminimize(), w.set_focus()));
+        return Ok(());
+    }
+    let label = format!("pop-{n}");
+    // Stacked up from the bottom right of the screen the app is on.
+    let (mut x, mut y) = (60.0, 60.0);
+    if let Some(m) = app.get_window("main").and_then(|w| w.current_monitor().ok().flatten()) {
+        let scale = m.scale_factor();
+        let (pos, size) = (m.position().to_logical::<f64>(scale), m.size().to_logical::<f64>(scale));
+        let shift = f64::from((n - 1) % 6) * 28.0;
+        x = pos.x + size.width - 420.0 - 24.0 - shift;
+        y = pos.y + size.height - 640.0 - 64.0 - shift;
+    }
+    let title_app = app.clone();
+    let title_label = label.clone();
+    let mut builder = tauri::WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url.clone()))
+        .title(format!("{} · {}", service.name, account.label))
+        .inner_size(400.0, 620.0)
+        .min_inner_size(300.0, 360.0)
+        .position(x, y)
+        .always_on_top(true)
+        .data_directory(accounts::profile_dir(&state.profiles, &account.id))
+        .initialization_script(page_script(service, &account, true))
+        .on_navigation(move |url| {
+            if service.allows(url) {
+                true
+            } else {
+                open_external(url);
+                false
+            }
+        })
+        .on_new_window(move |url, _features| {
+            if service.allows_popup(&url) {
+                NewWindowResponse::Allow
+            } else {
+                open_external(&url);
+                NewWindowResponse::Deny
+            }
+        })
+        .on_document_title_changed(move |_window, title| {
+            {
+                let state = title_app.state::<AppState>();
+                let mut inner = state.inner.lock().unwrap();
+                let Some(pop) = inner.pops.iter_mut().find(|p| p.label == title_label) else { return };
+                pop.title = title;
+            }
+            refresh_shell(&title_app);
+        });
+    // The same browser options as the account's page, as they share its profile.
+    if account.realtime {
+        builder = builder.additional_browser_args(REALTIME_ARGS);
+    }
+    let window = builder.build().map_err(|e| e.to_string())?;
+    state.inner.lock().unwrap().pops.push(Pop { label: label.clone(), account: account.id.clone(), title: String::new(), url: url.to_string() });
+    let closed_app = app.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Destroyed = event {
+            closed_app.state::<AppState>().inner.lock().unwrap().pops.retain(|p| p.label != label);
+            layout(&closed_app);
+            refresh_shell(&closed_app);
+        }
+    });
+    layout(app);
+    refresh_shell(app);
+    Ok(())
+}
+
+/// A chip in the chat bar: brings that chat's window up, or tucks it away if
+/// it's already in front.
+#[tauri::command]
+fn toggle_pop(webview: Webview, state: State<'_, AppState>, app: AppHandle, label: String) -> Result<(), String> {
+    guard(&webview, &state)?;
+    let window = pop_window(&app, &label).ok_or("no such chat")?;
+    let in_front = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false) && window.is_focused().unwrap_or(false);
+    if in_front {
+        window.minimize().map_err(|e| e.to_string())
+    } else {
+        let _ = window.show();
+        let _ = window.unminimize();
+        window.set_focus().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn close_pop(webview: Webview, state: State<'_, AppState>, app: AppHandle, label: String) -> Result<(), String> {
+    guard(&webview, &state)?;
+    pop_window(&app, &label).ok_or("no such chat")?.close().map_err(|e| e.to_string())
 }
 
 pub(crate) fn set_dnd_until(app: &AppHandle, until: Option<u64>) {
@@ -369,14 +527,15 @@ pub(crate) fn change_account(
         let _ = w.set_zoom(account.zoom);
         let _ = w.eval(format!("(window.__mcSettings ||= {{}}).blockTyping = {}", account.block_typing));
     }
+    show_total_unread(app);
     refresh_shell(app);
     Ok(())
 }
 
 /// The scripts a service's page gets at document start: the notifications
 /// shim everywhere, the account's options, and the service's own restyling.
-fn page_script(service: &services::Service, account: &Account) -> String {
-    let options = serde_json::json!({ "blockTyping": account.block_typing });
+fn page_script(service: &services::Service, account: &Account, popout: bool) -> String {
+    let options = serde_json::json!({ "blockTyping": account.block_typing, "popout": popout });
     let mut script = format!("window.__mcSettings = {options};\n{}", include_str!("inject/notify.js"));
     if let Some(inject) = service.inject {
         script.push('\n');
@@ -400,7 +559,7 @@ fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, p
 
     let mut builder = WebviewBuilder::new(webview_label(&account.id), WebviewUrl::External(url))
         .data_directory(accounts::profile_dir(profiles, &account.id))
-        .initialization_script(page_script(service, account))
+        .initialization_script(page_script(service, account, false))
         .focused(false)
         .on_navigation(move |url| {
             if service.allows(url) {
@@ -502,6 +661,12 @@ async fn remove_account(app: AppHandle, webview: Webview, state: State<'_, AppSt
     }
     if let Some(w) = app.get_webview(&webview_label(&id)) {
         let _ = w.close();
+    }
+    let pops: Vec<String> = state.inner.lock().unwrap().pops.iter().filter(|p| p.account == id).map(|p| p.label.clone()).collect();
+    for label in pops {
+        if let Some(w) = pop_window(&app, &label) {
+            let _ = w.close();
+        }
     }
     // Sign the account out for good by deleting its profile. The browser process
     // lets go of the files a moment after the webview closes, so retry for a while.
@@ -912,6 +1077,7 @@ fn on_panic_shortcut(app: &AppHandle) {
     let showing = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
     if showing {
         lock_app(app);
+        hide_pops(app);
         hide_window(app);
     } else {
         show_window(app);
@@ -954,6 +1120,8 @@ pub fn run() {
             open_recent,
             clear_recent,
             set_realtime,
+            toggle_pop,
+            close_pop,
             notify
         ])
         .on_menu_event(|app, event| menus::on_menu_event(app, event.id().as_ref()))
@@ -992,6 +1160,8 @@ pub fn run() {
                     low_memory: HashMap::new(),
                     recent: VecDeque::new(),
                     loaded_at: HashMap::new(),
+                    pops: Vec::new(),
+                    pop_seq: 0,
                 }),
                 settings: Mutex::new(settings),
                 accounts_file,

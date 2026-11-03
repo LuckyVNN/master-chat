@@ -22,6 +22,9 @@
   };
 
   const CHATS = "data-mc-chats";
+  // A popped-out chat (its own small window): just the conversation.
+  const POP = "data-mc-pop";
+  if (settings.popout) withRoot((root) => root.setAttribute(POP, ""));
   const onChatsPage = () => /^\/(messages|messenger_media)(\/|$)/.test(location.pathname);
   const loggedIn = () => /(^|;\s*)c_user=/.test(document.cookie);
 
@@ -93,6 +96,7 @@
     html[${CHATS}] [role="dialog"], html[${CHATS}] [role="dialog"] * { --header-height: 56px !important; }
     /* The chat list's edge can be dragged to resize it. */
     [${LIST}] { position: relative; }
+    html[${POP}] [${LIST}], html[${POP}] .mc-pane-edge { display: none !important; }
     .mc-pane-edge { position: absolute; top: 0; bottom: 0; right: -6px; width: 9px; z-index: 5; cursor: col-resize; touch-action: none; }
     .mc-pane-edge::after {
       content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px;
@@ -181,8 +185,10 @@
   // ("Unread message:"), clipped to 1px.
   const titleProp = Object.getOwnPropertyDescriptor(Document.prototype, "title");
   let unread = 0;
+  // A popped-out chat is titled with the conversation's name, for the chat bar.
+  let chatName = "";
   const applyTitle = () => {
-    const wanted = unread ? `(${unread}) Messenger` : "Messenger";
+    const wanted = settings.popout ? chatName || "Messenger" : unread ? `(${unread}) Messenger` : "Messenger";
     if (titleProp.get.call(document) !== wanted) titleProp.set.call(document, wanted);
   };
   Object.defineProperty(document, "title", { configurable: true, get: () => titleProp.get.call(document), set: applyTitle });
@@ -253,8 +259,21 @@
       const rows = [...document.querySelectorAll('[role="grid"] [role="row"] a[href*="/messages/"]')];
       const unreadRows = rows.filter((row) => row.getBoundingClientRect().width > 0 && isUnreadRow(row));
       unread = unreadRows.length;
-      if (rows.length && !quietUntil) quietUntil = Date.now() + 10000;
-      if (rows.length) announce(unreadRows);
+      if (settings.popout) {
+        // The main window announces messages; here the list (hidden) just names the chat.
+        const own = rows.find((row) => row.getAttribute("href")?.replace(/\/$/, "") === location.pathname.replace(/\/$/, ""));
+        // The list is hidden here, so its first text is read directly: the name.
+        const walker = own && document.createTreeWalker(own, NodeFilter.SHOW_TEXT);
+        for (let node = walker?.nextNode(); node; node = walker.nextNode()) {
+          if (node.textContent.trim()) {
+            chatName = node.textContent.trim();
+            break;
+          }
+        }
+      } else {
+        if (rows.length && !quietUntil) quietUntil = Date.now() + 10000;
+        if (rows.length) announce(unreadRows);
+      }
     }
     // Also puts the title back if Facebook rewrote the <title> element itself.
     applyTitle();

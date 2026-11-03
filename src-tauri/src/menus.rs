@@ -46,12 +46,28 @@ pub fn account_menu(app: &AppHandle, id: &str) -> Result<Menu<Wry>, String> {
     let reload = item(app, a("reload"), "Reload", true)?;
     let edit = item(app, a("edit"), "Edit name and color…", true)?;
     let notify = check(app, a("notify"), "Notifications", account.notify)?;
+    let read_all = item(app, a("read_all"), "Mark all as read", true)?;
+    let service = crate::services::find(&account.service).ok_or("unknown service")?;
+    let on_chat = app
+        .get_webview(&crate::webview_label(id))
+        .and_then(|w| w.url().ok())
+        .is_some_and(|url| service.is_chat(&url));
+    let pop = item(app, a("pop"), if on_chat { "Pop out this chat" } else { "Pop out this chat (open one first)" }, on_chat)?;
+    let hide_count = check(app, a("hide_count"), "Hide unread count", account.hide_unread)?;
     let typing = check(app, a("typing"), "Hide that I'm typing", account.block_typing)?;
     let up = item(app, a("up"), "Move up", index > 0)?;
     let down = item(app, a("down"), "Move down", index + 1 < count)?;
     let remove = item(app, a("remove"), "Remove…", true)?;
-    let (sep1, sep2, sep3) = (separator(app)?, separator(app)?, separator(app)?);
-    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&reload, &edit, &sep1, &notify];
+    let (sep0, sep1, sep2, sep3) = (separator(app)?, separator(app)?, separator(app)?, separator(app)?);
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![];
+    if !service.chat_paths.is_empty() {
+        items.extend([&pop as &dyn IsMenuItem<Wry>, &sep0]);
+    }
+    items.extend([&reload as &dyn IsMenuItem<Wry>, &edit, &sep1]);
+    if account.service == "gmail" {
+        items.push(&read_all);
+    }
+    items.extend([&hide_count as &dyn IsMenuItem<Wry>, &notify]);
     if account.service == "messenger" {
         items.push(&typing);
     }
@@ -142,13 +158,29 @@ fn on_account_action(app: &AppHandle, action: &str, id: &str) {
         // Editing and removing ask in the shell, which then calls the commands.
         "edit" => call_shell(app, format!("window.masterChat.edit({id_js})")),
         "remove" => call_shell(app, format!("window.masterChat.remove({id_js})")),
-        "notify" | "typing" | "zoom_in" | "zoom_out" | "zoom_reset" | "up" | "down" => {
+        "pop" => {
+            let app = app.clone();
+            let id = id.to_string();
+            // Creating a window from inside a menu callback can stall Windows' event loop.
+            std::thread::spawn(move || {
+                if let Err(e) = crate::pop_out(&app, &id) {
+                    eprintln!("could not pop out: {e}");
+                }
+            });
+        }
+        "read_all" => {
+            if let Some(w) = app.get_webview(&crate::webview_label(id)) {
+                let _ = w.eval("window.__mcMarkAllRead && window.__mcMarkAllRead()");
+            }
+        }
+        "notify" | "typing" | "hide_count" | "zoom_in" | "zoom_out" | "zoom_reset" | "up" | "down" => {
             let _ = crate::change_account(app, id, |accounts, i| {
                 let count = accounts.len();
                 let zoom = accounts[i].zoom;
                 match action {
                     "notify" => accounts[i].notify = !accounts[i].notify,
                     "typing" => accounts[i].block_typing = !accounts[i].block_typing,
+                    "hide_count" => accounts[i].hide_unread = !accounts[i].hide_unread,
                     "zoom_in" => accounts[i].zoom = crate::accounts::clamp_zoom(zoom + 0.1),
                     "zoom_out" => accounts[i].zoom = crate::accounts::clamp_zoom(zoom - 0.1),
                     "zoom_reset" => accounts[i].zoom = 1.0,

@@ -26,6 +26,8 @@
     "allow-install-update",
     "allow-open-recent",
     "allow-clear-recent",
-    "allow-set-realtime"
+    "allow-set-realtime",
+    "allow-toggle-pop",
+    "allow-close-pop"
   ]
 }

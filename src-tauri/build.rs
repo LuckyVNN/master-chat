@@ -26,6 +26,8 @@ fn main() {
             "open_recent",
             "clear_recent",
             "set_realtime",
+            "toggle_pop",
+            "close_pop",
             "notify",
         ]),
     ))

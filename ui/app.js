@@ -11,7 +11,7 @@ const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 let services = [];
-let state = { accounts: [], active: null, locked: false, settings: {}, version: "", recent: [] };
+let state = { accounts: [], active: null, locked: false, settings: {}, version: "", recent: [], pops: [] };
 let picked = null;
 let editing = null;
 let editColor = "";
@@ -51,6 +51,7 @@ function render() {
   $("#dnd").title = state.settings.dnd_until ? "Do Not Disturb is on" : "Do Not Disturb";
   for (const id of ["#home", "#add", "#dnd", "#manage"]) $(id).hidden = state.locked;
   renderSidebar();
+  renderDock();
   if (state.locked) {
     showOnly("lock-panel");
     setTimeout(() => $("#unlock-pin").focus());
@@ -59,6 +60,26 @@ function render() {
   }
   if (!$("#manage-panel").hidden) renderSettings();
   if (!$("#dashboard").hidden) renderDashboard();
+}
+
+function renderDock() {
+  const pops = state.locked ? [] : state.pops.filter((p) => state.accounts.some((a) => a.id === p.account));
+  document.body.classList.toggle("docked", pops.length > 0);
+  $("#dock").hidden = pops.length === 0;
+  $("#dock").replaceChildren(
+    ...pops.map((p) => {
+      const a = state.accounts.find((x) => x.id === p.account);
+      const svc = serviceOf(a.service);
+      const name = p.title || svc.name;
+      return el("div", { className: "pop", style: `--c:${colorOf(a)}`, title: `${name} · ${a.label}` }, [
+        el("button", { className: "show", onclick: () => invoke("toggle_pop", { label: p.label }) }, [
+          logo(svc.id, colorOf(a), "dot"),
+          el("span", { textContent: name }),
+        ]),
+        el("button", { className: "close", title: "Close", "aria-label": `Close ${name}`, textContent: "×", onclick: () => invoke("close_pop", { label: p.label }) }),
+      ]);
+    })
+  );
 }
 
 function ago(seconds) {
@@ -88,9 +109,11 @@ function renderDashboard() {
   $("#dash-accounts").replaceChildren(
     ...state.accounts.map((a) => {
       const svc = serviceOf(a.service);
-      const count = a.unread
-        ? [el("b", { textContent: a.unread > 999 ? "999+" : a.unread }), el("small", { textContent: "unread" })]
-        : [el("span", { className: "done", textContent: "Up to date" })];
+      const count = a.hide_unread
+        ? [el("span", { className: "done", textContent: "Count hidden" })]
+        : a.unread
+          ? [el("b", { textContent: a.unread > 999 ? "999+" : a.unread }), el("small", { textContent: "unread" })]
+          : [el("span", { className: "done", textContent: "Up to date" })];
       const realtime = el("input", {
         type: "checkbox",
         checked: a.realtime,
@@ -99,7 +122,12 @@ function renderDashboard() {
           setState(await invoke("set_realtime", { id: a.id, on: e.target.checked }).catch(() => invoke("list_accounts")));
         },
       });
-      return el("div", { className: "card", style: `--c:${colorOf(a)}` }, [
+      // Right-click: the account's menu (mark all as read, hide the count, …).
+      const menu = (e) => {
+        e.preventDefault();
+        invoke("show_account_menu", { id: a.id });
+      };
+      return el("div", { className: "card", style: `--c:${colorOf(a)}`, oncontextmenu: menu }, [
         el("button", { className: "open", onclick: () => select(a.id) }, [
           logo(svc.id, colorOf(a), "dot"),
           el("span", { className: "who" }, [

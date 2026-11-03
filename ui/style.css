@@ -280,3 +280,28 @@ body.labels #accounts { gap: 6px; }
 #dash-recent .meta { flex: none; color: var(--muted); font-size: 12px; text-align: right; max-width: 34%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #dash-empty { margin: 10px 0 0; }
 .dash-hint { margin: 10px 0 0 !important; font-size: 12px; }
+
+/* The chat bar: popped-out chats along the bottom, beside the sidebar. */
+#dock {
+  position: fixed;
+  left: var(--sidebar);
+  right: 0;
+  bottom: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--side);
+  border-top: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body.docked #content { padding-bottom: 68px; }
+.pop { flex: none; display: flex; align-items: center; max-width: 220px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); }
+.pop:hover { border-color: var(--c); }
+.pop .show { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 4px 4px 4px 6px; border: 0; background: transparent; }
+.pop .show span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.pop .dot { width: 22px; height: 22px; flex: none; border-radius: 7px; background: var(--c); }
+.pop .close { flex: none; width: 24px; height: 28px; border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.pop .close:hover { color: var(--text); }

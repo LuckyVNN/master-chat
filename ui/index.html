@@ -90,7 +90,7 @@
 
       <h3>Accounts</h3>
       <ul id="manage-list"></ul>
-      <p class="hint">Right-click an account in the sidebar for more (notifications, zoom, hide typing), and drag it to reorder. Removing an account deletes its browser profile on this computer, which signs it out for good.</p>
+      <p class="hint">Right-click an account in the sidebar or on the overview for more (pop out the open chat, mark all as read, hide its unread count, notifications, zoom), and drag it to reorder. Removing an account deletes its browser profile on this computer, which signs it out for good.</p>
 
       <h3>Appearance</h3>
       <div class="row">
@@ -137,6 +137,9 @@
       <div class="actions"><button class="primary" data-close>Done</button></div>
     </section>
   </main>
+
+  <!-- Popped-out chats: click one to bring its window up or tuck it away. -->
+  <div id="dock" hidden></div>
 
   <script src="app.js"></script>
 </body>

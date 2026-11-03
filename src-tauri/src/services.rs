@@ -27,6 +27,11 @@ pub struct Service {
     /// the app adds no plain notice when the unread count rises.
     #[serde(skip)]
     pub describes_messages: bool,
+    /// Path prefixes of a single conversation's page, which can be popped out
+    /// into a window of its own. Empty where a chat has no address of its own,
+    /// or the service allows only one open copy (WhatsApp).
+    #[serde(skip)]
+    pub chat_paths: &'static [&'static str],
 }
 
 pub const SERVICES: &[Service] = &[
@@ -40,6 +45,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: None,
         inject: Some(include_str!("inject/gmail.js")),
         describes_messages: true,
+        chat_paths: &[],
     },
     Service {
         id: "outlook",
@@ -61,6 +67,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: None,
         inject: Some(include_str!("inject/outlook.js")),
         describes_messages: false,
+        chat_paths: &[],
     },
     Service {
         id: "messenger",
@@ -72,6 +79,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: Some(&["/groupcall", "/videocall", "/messenger_media"]),
         inject: Some(include_str!("inject/messenger.js")),
         describes_messages: true,
+        chat_paths: &["/messages/t/", "/messages/e2ee/t/"],
     },
     Service {
         id: "zalo",
@@ -83,6 +91,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: None,
         inject: None,
         describes_messages: false,
+        chat_paths: &[],
     },
     Service {
         id: "whatsapp",
@@ -94,6 +103,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: None,
         inject: None,
         describes_messages: false,
+        chat_paths: &[],
     },
     Service {
         id: "telegram",
@@ -105,6 +115,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: None,
         inject: None,
         describes_messages: false,
+        chat_paths: &[],
     },
     Service {
         id: "discord",
@@ -116,6 +127,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: None,
         inject: None,
         describes_messages: false,
+        chat_paths: &["/channels/"],
     },
     Service {
         id: "gemini",
@@ -128,6 +140,7 @@ pub const SERVICES: &[Service] = &[
         popup_paths: Some(&[]),
         inject: None,
         describes_messages: false,
+        chat_paths: &[],
     },
 ];
 
@@ -152,6 +165,11 @@ impl Service {
 }
 
 impl Service {
+    /// A single conversation's page, which can be popped out.
+    pub fn is_chat(&self, url: &Url) -> bool {
+        self.allows(url) && self.chat_paths.iter().any(|p| url.path().len() > p.len() && url.path().starts_with(p))
+    }
+
     pub fn is_sign_in(&self, url: &Url) -> bool {
         url.scheme() == "https" && url.host_str().is_some_and(|host| self.sign_in_hosts.contains(&host))
     }
@@ -201,6 +219,11 @@ mod tests {
         assert!(gmail.is_sign_in(&Url::parse("https://accounts.google.com/v3/signin").unwrap()));
         assert!(!gmail.is_sign_in(&Url::parse("https://mail.google.com/").unwrap()));
         assert!(!messenger.is_sign_in(&Url::parse("https://www.facebook.com/login").unwrap()));
+        assert!(messenger.is_chat(&Url::parse("https://www.facebook.com/messages/t/1234").unwrap()));
+        assert!(messenger.is_chat(&Url::parse("https://www.facebook.com/messages/e2ee/t/1234").unwrap()));
+        assert!(!messenger.is_chat(&Url::parse("https://www.facebook.com/messages/t/").unwrap()));
+        assert!(!messenger.is_chat(&Url::parse("https://www.facebook.com/messages/").unwrap()));
+        assert!(!gmail.is_chat(&Url::parse("https://mail.google.com/mail/u/0/#inbox").unwrap()));
     }
 
     #[test]
