@@ -34,6 +34,9 @@ use tauri_plugin_updater::UpdaterExt;
 const SIDEBAR: f64 = 68.0;
 /// Height of the bar along the bottom that lists popped-out chats, when there are any.
 const DOCK: f64 = 44.0;
+/// A popped-out chat's page is kept at least this wide (zoomed out if need be):
+/// narrower, Facebook shows only its chat list.
+const PAGE_MIN: f64 = 600.0;
 /// Label of the local UI webview, the only one allowed to manage the app.
 const SHELL: &str = "shell";
 /// Hides the window (and locks the app, if the lock is on) from anywhere.
@@ -392,6 +395,11 @@ fn hide_pops(app: &AppHandle) {
 /// on top of other windows. It uses the account's browser profile (so it's
 /// signed in) and the same rules for where it may go.
 pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
+    let url = app.get_webview(&webview_label(account_id)).ok_or("not open")?.url().map_err(|e| e.to_string())?;
+    pop_out_url(app, account_id, url)
+}
+
+fn pop_out_url(app: &AppHandle, account_id: &str, url: Url) -> Result<(), String> {
     let state = app.state::<AppState>();
     let (account, n) = {
         let mut inner = state.inner.lock().unwrap();
@@ -403,7 +411,6 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
         (account, inner.pop_seq)
     };
     let service = services::find(&account.service).ok_or("unknown service")?;
-    let url = app.get_webview(&webview_label(account_id)).ok_or("not open")?.url().map_err(|e| e.to_string())?;
     if !service.is_chat(&url) {
         return Err("open a conversation first".into());
     }
@@ -418,15 +425,15 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
         let scale = m.scale_factor();
         let (pos, size) = (m.position().to_logical::<f64>(scale), m.size().to_logical::<f64>(scale));
         let shift = f64::from((n - 1) % 6) * 28.0;
-        x = pos.x + size.width - 420.0 - 24.0 - shift;
-        y = pos.y + size.height - 640.0 - 64.0 - shift;
+        x = pos.x + size.width - 480.0 - 24.0 - shift;
+        y = pos.y + size.height - 660.0 - 64.0 - shift;
     }
     let title_app = app.clone();
     let title_label = label.clone();
     let mut builder = tauri::WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url.clone()))
         .title(service.name)
-        .inner_size(400.0, 620.0)
-        .min_inner_size(300.0, 360.0)
+        .inner_size(480.0, 640.0)
+        .min_inner_size(320.0, 360.0)
         .position(x, y)
         .always_on_top(true)
         // Its button is in the app's chat bar, not on the Windows taskbar.
@@ -467,6 +474,13 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
     let window = builder.build().map_err(|e| e.to_string())?;
     state.inner.lock().unwrap().pops.push(Pop { label: label.clone(), account: account.id.clone(), title: String::new(), url: url.to_string() });
     let closed_app = app.clone();
+    // Facebook renders no conversation below 600px of page width, so a narrower
+    // window is zoomed out to keep the page that wide.
+    let fit = move |w: &tauri::WebviewWindow| {
+        let width = w.inner_size().ok().zip(w.scale_factor().ok()).map_or(PAGE_MIN, |(s, f)| s.to_logical::<f64>(f).width);
+        let _ = w.set_zoom(account.zoom * (width / PAGE_MIN).min(1.0));
+    };
+    fit(&window);
     let tuck = window.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Destroyed => {
@@ -479,6 +493,7 @@ pub(crate) fn pop_out(app: &AppHandle, account_id: &str) -> Result<(), String> {
             let _ = tuck.hide();
             let _ = tuck.unminimize();
         }
+        WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => fit(&tuck),
         _ => {}
     });
     layout(app);

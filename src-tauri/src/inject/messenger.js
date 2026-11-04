@@ -96,8 +96,15 @@
     html[${CHATS}] [role="dialog"], html[${CHATS}] [role="dialog"] * { --header-height: 56px !important; }
     /* The chat list's edge can be dragged to resize it. */
     [${LIST}] { position: relative; }
-    /* A popped-out chat is narrow: Facebook shows just the conversation then. */
-    html[${POP}] .mc-pane-edge { display: none !important; }
+    /* A popped-out chat: just the conversation. The app keeps the page at
+       least 600px wide (zooming out a narrower window), below which Facebook
+       renders no conversation at all; the chat list beside it is hidden. */
+    html[${POP}] [${LIST}], html[${POP}] .mc-pane-edge { display: none !important; }
+    html[${POP}] [role="main"] {
+      position: fixed !important; inset: 0 !important;
+      width: auto !important; max-width: none !important;
+      z-index: 2 !important; background: var(--surface-background) !important;
+    }
     .mc-pane-edge { position: absolute; top: 0; bottom: 0; right: -6px; width: 9px; z-index: 5; cursor: col-resize; touch-action: none; }
     .mc-pane-edge::after {
       content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px;
