@@ -81,6 +81,11 @@ pub(crate) struct Inner {
     pop_seq: u32,
     /// Accounts whose page shows a sign-in screen.
     signed_out: HashSet<String>,
+    /// Each account page's address, as the page last reported it. Asking a
+    /// webview for it instead means waiting on the main thread, which must
+    /// never happen while `inner` is locked: the main thread may be waiting
+    /// for that lock, and the app would freeze.
+    page_url: HashMap<String, Url>,
     /// Each account's unread count every HISTORY_STEP, oldest first, for a day.
     history: HashMap<String, VecDeque<u32>>,
     /// When you stepped away (the window lost focus, or no input), if you have.
@@ -263,9 +268,7 @@ fn snapshot(app: &AppHandle) -> Snapshot {
                 realtime: a.realtime,
                 hide_unread: a.hide_unread,
                 signed_out: inner.signed_out.contains(&a.id),
-                on_chat: services::find(&a.service).is_some_and(|s| {
-                    app.get_webview(&webview_label(&a.id)).and_then(|w| w.url().ok()).is_some_and(|u| s.is_chat(&u))
-                }),
+                on_chat: services::find(&a.service).zip(inner.page_url.get(&a.id)).is_some_and(|(s, u)| s.is_chat(u)),
                 history: inner.history.get(&a.id).map(|h| h.iter().copied().collect()).unwrap_or_default(),
             })
             .collect()
@@ -1134,15 +1137,18 @@ fn open_message(app: &AppHandle, account_id: &str, id: u32) {
 
 /// A service page reports whether it shows a sign-in screen (notify.js).
 #[tauri::command]
-fn page_state(app: AppHandle, webview: Webview, signed_out: bool) -> Result<(), String> {
+fn page_state(app: AppHandle, webview: Webview, signed_out: bool, url: String) -> Result<(), String> {
     let account_id = webview.label().strip_prefix("acc-").ok_or("forbidden")?.to_string();
+    let url = Url::parse(&url).map_err(|e| e.to_string())?;
     let changed = {
         let state = app.state::<AppState>();
         let mut inner = state.inner.lock().unwrap();
         if !inner.accounts.iter().any(|a| a.id == account_id) {
             return Err("unknown account".into());
         }
-        if signed_out { inner.signed_out.insert(account_id) } else { inner.signed_out.remove(&account_id) }
+        let moved = inner.page_url.insert(account_id.clone(), url.clone()).is_none_or(|before| before != url);
+        let flipped = if signed_out { inner.signed_out.insert(account_id) } else { inner.signed_out.remove(&account_id) };
+        moved || flipped
     };
     if changed {
         refresh_shell(&app);
@@ -1414,6 +1420,7 @@ pub fn run() {
                     pops: Vec::new(),
                     pop_seq: 0,
                     signed_out: HashSet::new(),
+                    page_url: HashMap::new(),
                     history: HashMap::new(),
                     left_at: None,
                     away_since: None,

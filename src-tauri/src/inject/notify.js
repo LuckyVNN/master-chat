@@ -75,14 +75,17 @@
     /\/(login|signin|sign_in|checkpoint)(\/|$)/i.test(location.pathname) ||
     [...document.querySelectorAll('input[type="password"]')].some(shown) ||
     [...document.querySelectorAll('canvas[aria-label*="QR" i], #auth-qr-form, [class*="qrcode" i], [class*="qr-code" i]')].some(shown);
-  let reported = null;
+  // Reported with the page's address (so the app knows if a chat is open, to
+  // pop it out), only when either changes.
+  let reported = "";
   setInterval(() => {
     if (document.readyState !== "complete") return;
-    const out = signedOut();
-    if (out === reported) return;
-    reported = out;
-    window.__TAURI_INTERNALS__?.invoke("page_state", { signedOut: out }).catch(() => {});
-  }, 10000);
+    const state = { signedOut: signedOut(), url: location.href };
+    const key = JSON.stringify(state);
+    if (key === reported) return;
+    reported = key;
+    window.__TAURI_INTERNALS__?.invoke("page_state", state).catch(() => {});
+  }, 3000);
 
   // Called by the app when a notification is clicked.
   window.__mcNotificationClicked = (id) => {
