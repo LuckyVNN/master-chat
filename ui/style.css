@@ -68,7 +68,7 @@ body.labels #accounts { gap: 6px; }
   transition: border-radius .15s, transform .15s;
 }
 .acct:hover { border-radius: 11px; }
-.slot.dragging .acct { opacity: .7; transform: scale(1.08); cursor: grabbing; }
+.slot.dragging .acct { opacity: .7; transform: scale(1.84); cursor: grabbing; }
 .slot.dragging { z-index: 1; }
 .acct, .dot { display: grid; place-items: center; }
 .glyph {
@@ -233,18 +233,10 @@ body.labels #accounts { gap: 6px; }
   background: transparent;
   text-align: left;
 }
-.card .realtime {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px 9px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.card .realtime input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
-.card .realtime:has(input:checked) { color: var(--text); }
+.card .ticks { display: flex; gap: 14px; padding: 6px 12px 9px; border-top: 1px solid var(--line); }
+.card .ticks label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.card .ticks input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.card .ticks label:has(input:checked) { color: var(--text); }
 .card .dot { width: 38px; height: 38px; flex: none; border-radius: 11px; background: var(--c); }
 .card .who { flex: 1; min-width: 0; }
 .card .who b, .card .who small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -305,3 +297,27 @@ body.docked #content { padding-bottom: 68px; }
 .pop .dot { width: 22px; height: 22px; flex: none; border-radius: 7px; background: var(--c); }
 .pop .close { flex: none; width: 24px; height: 28px; border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
 .pop .close:hover { color: var(--text); }
+
+/* Sakura: a soft pink palette with petals drifting behind the panels. The
+   service pages show their light look meanwhile (set by the app). */
+:root[data-theme="sakura"] {
+  --bg: #fff6f9;
+  --side: #fbe4ec;
+  --card: #fffdfe;
+  --text: #4b2a37;
+  --muted: #9b6a7d;
+  --line: #f4d2de;
+  --accent: #e0628c;
+  --danger: #df4a5f;
+  color-scheme: light;
+}
+:root[data-theme="sakura"] #content {
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360'><path transform='translate(40 50) rotate(20) scale(1.70)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.55'/><path transform='translate(170 30) rotate(-35) scale(1.36)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.4'/><path transform='translate(300 90) rotate(60) scale(2.04)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.5'/><path transform='translate(90 180) rotate(110) scale(1.19)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.35'/><path transform='translate(230 210) rotate(-80) scale(1.70)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.45'/><path transform='translate(330 300) rotate(25) scale(1.36)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.4'/><path transform='translate(140 320) rotate(150) scale(1.87)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.5'/><path transform='translate(30 280) rotate(-20) scale(1.02)' d='M0-9c3 2 5 6 3 10-1 2-2 3-3 5-1-2-2-3-3-5-2-4 0-8 3-10l0 3z' fill='%23f4a7bf' fill-opacity='0.3'/></svg>");
+  background-size: 360px 360px;
+  animation: petals-drift 60s linear infinite;
+}
+@keyframes petals-drift { to { background-position: 360px 360px; } }
+@media (prefers-reduced-motion: reduce) { :root[data-theme="sakura"] #content { animation: none; } }
+:root[data-theme="sakura"] .panel { box-shadow: 0 10px 30px -18px rgba(224, 98, 140, .45); }
+:root[data-theme="sakura"] .acct { box-shadow: 0 3px 10px -6px rgba(140, 40, 80, .5); }
+:root[data-theme="sakura"] #sidebar { background: linear-gradient(180deg, #fbe4ec, #f7d6e2); }

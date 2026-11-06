@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-notify"
+description = "Enables the set_notify command without any pre-configured scope."
+commands.allow = ["set_notify"]
+
+[[permission]]
+identifier = "deny-set-notify"
+description = "Denies the set_notify command without any pre-configured scope."
+commands.deny = ["set_notify"]

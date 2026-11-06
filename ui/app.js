@@ -47,6 +47,8 @@ function logo(serviceId, color, className) {
 
 function render() {
   document.body.classList.toggle("labels", Boolean(state.settings.show_labels));
+  // Sakura is the sidebar's own palette (style.css); the others follow Windows' or the app's light/dark.
+  document.documentElement.dataset.theme = state.settings.theme === "sakura" ? "sakura" : "";
   $("#dnd").classList.toggle("on", Boolean(state.settings.dnd_until));
   $("#dnd").title = state.settings.dnd_until ? "Do Not Disturb is on" : "Do Not Disturb";
   for (const id of ["#home", "#add", "#dnd", "#manage"]) $(id).hidden = state.locked;
@@ -114,14 +116,15 @@ function renderDashboard() {
         : a.unread
           ? [el("b", { textContent: a.unread > 999 ? "999+" : a.unread }), el("small", { textContent: "unread" })]
           : [el("span", { className: "done", textContent: "Up to date" })];
-      const realtime = el("input", {
-        type: "checkbox",
-        checked: a.realtime,
-        onchange: async (e) => {
-          e.target.disabled = true;
-          setState(await invoke("set_realtime", { id: a.id, on: e.target.checked }).catch(() => invoke("list_accounts")));
-        },
-      });
+      const tick = (command, checked) =>
+        el("input", {
+          type: "checkbox",
+          checked,
+          onchange: async (e) => {
+            e.target.disabled = true;
+            setState(await invoke(command, { id: a.id, on: e.target.checked }).catch(() => invoke("list_accounts")));
+          },
+        });
       // Right-click: the account's menu (mark all as read, hide the count, …).
       const menu = (e) => {
         e.preventDefault();
@@ -136,16 +139,22 @@ function renderDashboard() {
           ]),
           el("span", { className: "count" }, count),
         ]),
-        el(
-          "label",
-          {
-            className: "realtime",
-            title: a.realtime
-              ? "Stays fully awake while hidden, so new messages notify at once."
-              : "May idle while hidden to save memory and power; new messages can show up minutes late.",
-          },
-          [realtime, el("span", { textContent: a.realtime ? "Real-time" : "Real-time (off: may be late)" })]
-        ),
+        el("div", { className: "ticks" }, [
+          el(
+            "label",
+            { title: a.notify ? "Pop-up notifications for new messages." : "No pop-ups; new messages still show under Recent messages." },
+            [tick("set_notify", a.notify), el("span", { textContent: "Notifications" })]
+          ),
+          el(
+            "label",
+            {
+              title: a.realtime
+                ? "Stays fully awake while hidden, so new messages notify at once."
+                : "May idle while hidden to save memory and power; new messages can show up minutes late.",
+            },
+            [tick("set_realtime", a.realtime), el("span", { textContent: "Real-time" })]
+          ),
+        ]),
       ]);
     })
   );

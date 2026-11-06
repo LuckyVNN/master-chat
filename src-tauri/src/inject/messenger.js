@@ -220,6 +220,8 @@
   const notified = new Map();
   // The list fills in over a few seconds; unread chats seen by then are old news.
   let quietUntil = 0;
+  // The preview of a message you sent: "You: …" (Vietnamese "Bạn: …").
+  const MINE = /^(You|Bạn)\s*:/;
   const describeRow = (row) => {
     const texts = [];
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
@@ -265,7 +267,9 @@
     if (listChanged) {
       listChanged = false;
       const rows = [...document.querySelectorAll('[role="grid"] [role="row"] a[href*="/messages/"]')];
-      const unreadRows = rows.filter((row) => row.getBoundingClientRect().width > 0 && isUnreadRow(row));
+      // A chat whose last message is yours (sent from another device, say) isn't
+      // unread, though its row may carry clipped "Sent"/"Seen" text.
+      const unreadRows = rows.filter((row) => row.getBoundingClientRect().width > 0 && isUnreadRow(row) && !MINE.test(describeRow(row).preview));
       unread = unreadRows.length;
       if (settings.popout) {
         // The main window announces messages; here the list (hidden) just names the chat.

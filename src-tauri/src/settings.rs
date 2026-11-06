@@ -58,7 +58,7 @@ pub fn load(path: &Path) -> Settings {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
-    if !matches!(settings.theme.as_str(), "system" | "light" | "dark") {
+    if !matches!(settings.theme.as_str(), "system" | "light" | "dark" | "sakura") {
         settings.theme = "system".into();
     }
     settings

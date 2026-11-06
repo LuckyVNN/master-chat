@@ -339,7 +339,8 @@ fn hide_window(app: &AppHandle) {
 
 fn apply_theme(app: &AppHandle, theme: &str) {
     let theme = match theme {
-        "light" => Some(Theme::Light),
+        // Sakura is the sidebar's own palette; the services show their light look.
+        "light" | "sakura" => Some(Theme::Light),
         "dark" => Some(Theme::Dark),
         _ => None,
     };
@@ -736,6 +737,14 @@ fn reload_account(app: AppHandle, webview: Webview, state: State<'_, AppState>, 
     Ok(())
 }
 
+/// Notifications on or off for one account (the overview's tick; also in its menu).
+#[tauri::command]
+fn set_notify(app: AppHandle, webview: Webview, state: State<'_, AppState>, id: String, on: bool) -> Result<Snapshot, String> {
+    guard(&webview, &state)?;
+    change_account(&app, &id, |accounts, i| accounts[i].notify = on)?;
+    Ok(snapshot(&app))
+}
+
 /// Real-time on or off. Browser options are fixed when a page's browser starts,
 /// so the account's page is closed and opened again.
 #[tauri::command]
@@ -848,7 +857,7 @@ fn update_settings(app: AppHandle, webview: Webview, state: State<'_, AppState>,
     let (theme, panic) = {
         let mut s = state.settings.lock().unwrap();
         let before = (s.theme.clone(), s.panic_shortcut);
-        if let Some(theme) = update.theme.filter(|t| matches!(t.as_str(), "system" | "light" | "dark")) {
+        if let Some(theme) = update.theme.filter(|t| matches!(t.as_str(), "system" | "light" | "dark" | "sakura")) {
             s.theme = theme;
         }
         macro_rules! set {
@@ -1146,6 +1155,7 @@ pub fn run() {
             open_recent,
             clear_recent,
             set_realtime,
+            set_notify,
             toggle_pop,
             close_pop,
             notify
