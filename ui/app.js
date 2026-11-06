@@ -445,7 +445,41 @@ async function select(id) {
   await invoke("select_account", { id });
 }
 
-const update = (changes) => invoke("update_settings", { update: changes }).then(setState).catch((e) => alert(e));
+// Asks in the app's own dialog, then goes back to what was on screen. Resolves
+// to true (or the typed text, with `input`) for OK, and null for Cancel.
+let answer = null;
+function ask({ title, text = "", ok = "OK", cancel = "Cancel", danger = false, input = null }) {
+  answer?.(null);
+  const before = $$(".panel").find((p) => !p.hidden)?.id ?? null;
+  $("#ask-title").textContent = title;
+  $("#ask-text").textContent = text;
+  $("#ask-text").hidden = !text;
+  $("#ask-error").hidden = true;
+  const field = $("#ask-input");
+  field.hidden = !input;
+  field.value = "";
+  field.placeholder = input || "";
+  $("#ask-ok").textContent = ok;
+  $("#ask-ok").className = danger ? "danger solid" : "primary";
+  $("#ask-cancel").textContent = cancel;
+  $("#ask-cancel").hidden = !cancel;
+  return new Promise((resolve) => {
+    answer = async (value) => {
+      answer = null;
+      if (before && before !== "ask-panel") await openPanel(before);
+      else await closePanel();
+      resolve(value);
+    };
+    openPanel("ask-panel").then(() => (input ? field : $("#ask-ok")).focus());
+  });
+}
+const tell = (title, text) => ask({ title, text, cancel: null });
+$("#ask-ok").addEventListener("click", () => answer?.($("#ask-input").hidden ? true : $("#ask-input").value));
+$("#ask-cancel").addEventListener("click", () => answer?.(null));
+$("#ask-input").addEventListener("keydown", (e) => e.key === "Enter" && $("#ask-ok").click());
+document.addEventListener("keydown", (e) => e.key === "Escape" && !$("#ask-panel").hidden && answer?.(null));
+
+const update = (changes) => invoke("update_settings", { update: changes }).then(setState).catch((e) => tell("Couldn't save that", String(e)));
 
 $("#home").addEventListener("click", () => openPanel("dashboard"));
 $("#horo").addEventListener("click", () => openPanel("horo-panel"));
@@ -537,12 +571,12 @@ $("#pin-save").addEventListener("click", async () => {
   }
 });
 async function turnOffLock() {
-  const pin = prompt("Enter your PIN to turn the app lock off:");
+  const pin = await ask({ title: "Turn off the app lock", text: "Enter your PIN to turn the lock off.", ok: "Turn off", input: "PIN" });
   if (pin == null) return;
   try {
     setState(await invoke("disable_lock", { pin }));
   } catch (e) {
-    alert(e);
+    tell("The lock is still on", String(e));
   }
 }
 
@@ -763,7 +797,13 @@ window.masterChat = {
     const acct = state.accounts.find((a) => a.id === id);
     if (!acct) return;
     const svc = serviceOf(acct.service);
-    if (!confirm(`Remove "${acct.label}" (${svc.name}) and sign it out of this computer?`)) return;
+    const sure = await ask({
+      title: `Remove ${acct.label}?`,
+      text: `This removes the ${svc.name} account "${acct.label}" and signs it out of this computer for good.`,
+      ok: "Remove",
+      danger: true,
+    });
+    if (!sure) return;
     setState(await invoke("remove_account", { id }));
     if (state.accounts.length === 0) closePanel();
   },

@@ -322,6 +322,10 @@ body.labels #accounts { gap: 6px; }
 .horo-source { margin: 12px 0 0 !important; font-size: 12px; }
 .chip.horo-chip { cursor: pointer; color: var(--text); }
 .chip.horo-chip:hover { border-color: var(--accent); }
+#ask-panel { width: min(400px, 100%); text-align: left; }
+#ask-panel h2 { margin-bottom: 8px; }
+#ask-panel #ask-input { width: 100%; margin: 0 0 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.danger.solid { background: var(--danger); border-color: transparent; color: #fff; padding: 8px 16px; }
 .dash-hint { margin: 10px 0 0 !important; font-size: 12px; }
 
 /* The chat bar: popped-out chats along the bottom, beside the sidebar. */

@@ -119,6 +119,19 @@
       <p class="hint horo-source">From Asahi TV's <i>Oha Asa</i>, ranked 1 to 12, updated each weekday morning. English by machine translation.</p>
     </section>
 
+    <!-- The app's own question box: the browser's confirm() can open hidden
+         behind an account's page and leave the window unclickable. -->
+    <section id="ask-panel" class="panel narrow" hidden>
+      <h2 id="ask-title"></h2>
+      <p id="ask-text"></p>
+      <input id="ask-input" type="password" maxlength="32" autocomplete="off" hidden>
+      <p id="ask-error" class="error" hidden></p>
+      <div class="actions">
+        <button id="ask-cancel" class="ghost">Cancel</button>
+        <button id="ask-ok" class="primary">OK</button>
+      </div>
+    </section>
+
     <section id="update-panel" class="panel" hidden>
       <h2>Update available</h2>
       <p id="update-text"></p>
