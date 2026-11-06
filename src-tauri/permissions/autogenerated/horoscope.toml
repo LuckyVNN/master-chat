@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-horoscope"
+description = "Enables the horoscope command without any pre-configured scope."
+commands.allow = ["horoscope"]
+
+[[permission]]
+identifier = "deny-horoscope"
+description = "Denies the horoscope command without any pre-configured scope."
+commands.deny = ["horoscope"]

@@ -1,6 +1,6 @@
 [package]
 name = "master-chat"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 
 [lib]
@@ -20,6 +20,8 @@ tauri-plugin-updater = "2.14.1"
 sha2 = "0.11.1"
 pbkdf2 = "0.13.0"
 getrandom = "0.4.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "form", "charset"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [profile.release]
 codegen-units = 1

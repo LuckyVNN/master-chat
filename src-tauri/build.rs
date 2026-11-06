@@ -29,6 +29,12 @@ fn main() {
             "set_notify",
             "toggle_pop",
             "close_pop",
+            "account_action",
+            "reply_recent",
+            "dismiss_away",
+            "answer_update",
+            "horoscope",
+            "page_state",
             "notify",
         ]),
     ))

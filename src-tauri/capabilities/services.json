@@ -19,5 +19,5 @@
       "https://*.discord.com/*"
     ]
   },
-  "permissions": ["allow-notify"]
+  "permissions": ["allow-notify", "allow-page-state"]
 }

@@ -65,6 +65,25 @@
         : query(descriptor);
   }
 
+  // Signed out? A sign-in page, a visible password field or a QR code to scan
+  // (WhatsApp, Telegram, Zalo) means this account gets no messages until you
+  // sign in again; the overview shows that on its card.
+  const SIGN_IN_HOSTS = /^(accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|id\.zalo\.me)$/;
+  const shown = (el) => el.getBoundingClientRect().width > 0;
+  const signedOut = () =>
+    SIGN_IN_HOSTS.test(location.hostname) ||
+    /\/(login|signin|sign_in|checkpoint)(\/|$)/i.test(location.pathname) ||
+    [...document.querySelectorAll('input[type="password"]')].some(shown) ||
+    [...document.querySelectorAll('canvas[aria-label*="QR" i], #auth-qr-form, [class*="qrcode" i], [class*="qr-code" i]')].some(shown);
+  let reported = null;
+  setInterval(() => {
+    if (document.readyState !== "complete") return;
+    const out = signedOut();
+    if (out === reported) return;
+    reported = out;
+    window.__TAURI_INTERNALS__?.invoke("page_state", { signedOut: out }).catch(() => {});
+  }, 10000);
+
   // Called by the app when a notification is clicked.
   window.__mcNotificationClicked = (id) => {
     const notification = live.get(id);

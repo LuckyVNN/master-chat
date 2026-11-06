@@ -120,7 +120,7 @@ body.labels #accounts { gap: 6px; }
 .tool:hover { color: var(--text); border-style: solid; border-color: var(--line); }
 #dnd.on { color: #fff; background: #8b5cf6; border-color: transparent; }
 
-#content { flex: 1; display: grid; place-items: center; padding: 24px; overflow: auto; }
+#content { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 24px; overflow: auto; }
 .panel {
   width: min(520px, 100%);
   background: var(--card);
@@ -202,8 +202,8 @@ body.labels #accounts { gap: 6px; }
 
 #home.current { color: var(--text); background: var(--card); border-color: var(--line); border-style: solid; }
 /* While the overview is open, no account is the one on screen. */
-#home.current ~ #accounts .slot.active .acct { border-radius: 14px; box-shadow: none; }
-#home.current ~ #accounts .slot.active .name { color: var(--muted); font-weight: 400; }
+#home.current ~ #accounts .slot.active .acct, #horo.current ~ #accounts .slot.active .acct { border-radius: 14px; box-shadow: none; }
+#home.current ~ #accounts .slot.active .name, #horo.current ~ #accounts .slot.active .name { color: var(--muted); font-weight: 400; }
 
 /* The overview. */
 .panel.dash { width: min(860px, 100%); align-self: start; }
@@ -214,7 +214,7 @@ body.labels #accounts { gap: 6px; }
 .chip { padding: 3px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); font-size: 12px; white-space: nowrap; }
 .chip.dnd { background: #8b5cf6; border-color: transparent; color: #fff; }
 
-.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
 .card {
   display: flex;
   flex-direction: column;
@@ -233,8 +233,8 @@ body.labels #accounts { gap: 6px; }
   background: transparent;
   text-align: left;
 }
-.card .ticks { display: flex; gap: 14px; padding: 6px 12px 9px; border-top: 1px solid var(--line); }
-.card .ticks label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.card .ticks { display: flex; gap: 12px; padding: 6px 12px 9px; border-top: 1px solid var(--line); }
+.card .ticks label { white-space: nowrap; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .card .ticks input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .card .ticks label:has(input:checked) { color: var(--text); }
 .card .dot { width: 38px; height: 38px; flex: none; border-radius: 11px; background: var(--c); }
@@ -270,7 +270,58 @@ body.labels #accounts { gap: 6px; }
 #dash-recent .msg b { font-weight: 600; }
 #dash-recent .msg span { color: var(--muted); font-size: 13px; }
 #dash-recent .meta { flex: none; color: var(--muted); font-size: 12px; text-align: right; max-width: 34%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#dash-empty { margin: 10px 0 0; }
+#dash-empty, #dash-nomatch { margin: 10px 0 0; }
+#dash-recent li { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+#dash-recent li > button:first-child { flex: 1; min-width: 0; border-bottom: 0; }
+#dash-recent .reply { width: auto; flex: none; margin: 0 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.recent-tools { display: flex; align-items: center; gap: 6px; }
+.recent-tools input, .recent-tools select { width: auto; padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+.recent-tools input { width: 150px; }
+
+/* Signed out: the card turns amber. */
+.card.signed-out { border-color: #e0a23a; background: color-mix(in srgb, #f5b84b 12%, var(--bg)); }
+.card .count .out { color: #b7791f; font-size: 12px; font-weight: 600; }
+.card .out-note { margin: 0; padding: 0 12px 8px; color: #b7791f; font-size: 12px; }
+/* Unread over the day. */
+.card .spark { display: block; width: calc(100% - 24px); height: 22px; margin: 0 12px 8px; }
+.card .spark polyline { fill: none; stroke: var(--c); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.card .spark polygon { fill: var(--c); opacity: 0.12; }
+/* Quick actions, at the end of the ticks row. */
+.card .acts { display: flex; gap: 2px; margin-left: auto; }
+.card .act { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+.card .act:hover { background: var(--card); color: var(--text); }
+.card .act svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.card .ticks { align-items: center; }
+
+/* While you were away. */
+.away { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--card); }
+.away p { flex: 1; margin: 0; font-size: 13px; }
+.away p b { display: block; margin-bottom: 2px; }
+.away p span { color: var(--muted); }
+#update-panel .notes { max-height: 160px; overflow: auto; margin: -8px 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; white-space: pre-wrap; user-select: text; }
+#update-panel .tick { cursor: pointer; }
+/* Oha Asa. */
+#horo.current { color: var(--text); background: var(--card); border-color: var(--line); border-style: solid; }
+.panel.horo { width: min(720px, 100%); align-self: start; }
+.horo-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.horo-tools select { padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+.ja-toggle { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.ja-toggle input { margin: 0; accent-color: var(--accent); }
+#horo-status:empty { display: none; }
+#horo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+#horo-list li { display: flex; gap: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+#horo-list li.mine { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+#horo-list .rank { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--card); border: 1px solid var(--line); font-weight: 700; font-variant-numeric: tabular-nums; }
+#horo-list li.top .rank { background: #f5b84b; border-color: transparent; color: #3b2a07; }
+#horo-list li.last .rank { color: var(--muted); }
+#horo-list .body { flex: 1; min-width: 0; user-select: text; }
+#horo-list .name { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+#horo-list .name small { color: var(--muted); font-size: 12px; }
+#horo-list .body p { margin: 0; color: var(--text); font-size: 13px; }
+#horo-list .body p.lucky { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.horo-source { margin: 12px 0 0 !important; font-size: 12px; }
+.chip.horo-chip { cursor: pointer; color: var(--text); }
+.chip.horo-chip:hover { border-color: var(--accent); }
 .dash-hint { margin: 10px 0 0 !important; font-size: 12px; }
 
 /* The chat bar: popped-out chats along the bottom, beside the sidebar. */

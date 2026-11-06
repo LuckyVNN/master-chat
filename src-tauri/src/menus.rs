@@ -142,7 +142,7 @@ pub fn on_menu_event(app: &AppHandle, menu_id: &str) {
     }
 }
 
-fn on_account_action(app: &AppHandle, action: &str, id: &str) {
+pub(crate) fn on_account_action(app: &AppHandle, action: &str, id: &str) {
     let state = app.state::<AppState>();
     if state.inner.lock().unwrap().locked {
         return;

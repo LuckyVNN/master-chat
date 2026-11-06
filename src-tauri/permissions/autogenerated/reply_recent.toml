@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reply-recent"
+description = "Enables the reply_recent command without any pre-configured scope."
+commands.allow = ["reply_recent"]
+
+[[permission]]
+identifier = "deny-reply-recent"
+description = "Denies the reply_recent command without any pre-configured scope."
+commands.deny = ["reply_recent"]

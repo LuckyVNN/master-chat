@@ -1,6 +1,7 @@
 mod accounts;
 mod badge;
 mod google_domains;
+mod horoscope;
 mod links;
 mod lock;
 mod menus;
@@ -12,10 +13,10 @@ use accounts::Account;
 use serde::Serialize;
 use settings::{Settings, SettingsUpdate, SettingsView};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -48,6 +49,11 @@ const RECENT_MAX: usize = 30;
 /// Browser options for a real-time account: Chromium slows a hidden page's
 /// timers, down to once a minute after five minutes, which delays new messages.
 /// wry's own defaults (the first three features) are kept.
+/// One sample of each account's unread count this often, for a day.
+const HISTORY_STEP: Duration = Duration::from_secs(15 * 60);
+const HISTORY_LEN: usize = 96;
+/// Away this long (seconds) or more gets a summary of what came in meanwhile.
+const AWAY_MIN: u64 = 10 * 60;
 const REALTIME_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,IntensiveWakeUpThrottling \
     --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows";
 
@@ -73,6 +79,18 @@ pub(crate) struct Inner {
     /// Chats popped out into windows of their own, in the order opened.
     pops: Vec<Pop>,
     pop_seq: u32,
+    /// Accounts whose page shows a sign-in screen.
+    signed_out: HashSet<String>,
+    /// Each account's unread count every HISTORY_STEP, oldest first, for a day.
+    history: HashMap<String, VecDeque<u32>>,
+    /// When you stepped away (the window lost focus, or no input), if you have.
+    left_at: Option<u64>,
+    /// The start of your last absence of AWAY_MIN or more, for the overview's summary.
+    away_since: Option<u64>,
+    /// An update the app found on its own, waiting for your answer.
+    update: Option<UpdateInfo>,
+    /// Versions already offered this run, so each is asked about once.
+    offered: HashSet<String>,
 }
 
 /// A popped-out chat: a small window on one conversation, signed in through
@@ -126,6 +144,10 @@ struct AccountView {
     notify: bool,
     realtime: bool,
     hide_unread: bool,
+    signed_out: bool,
+    /// Its page is on a single chat, which can be popped out.
+    on_chat: bool,
+    history: Vec<u32>,
 }
 
 #[derive(Serialize)]
@@ -137,6 +159,8 @@ struct Snapshot {
     version: String,
     recent: Vec<Recent>,
     pops: Vec<Pop>,
+    away_since: Option<u64>,
+    update: Option<UpdateInfo>,
 }
 
 pub(crate) fn now_secs() -> u64 {
@@ -171,6 +195,46 @@ fn guard_shell(webview: &Webview) -> Result<(), String> {
 
 /// Links that leave a service go to the default browser, cleaned of redirects
 /// and tracking; other schemes are dropped.
+/// Sign-in and call popups of the service itself open as app windows on the
+/// same profile, held to the service's own sites; anything else goes to the
+/// default browser.
+fn service_popup(
+    app: &AppHandle,
+    service: &'static services::Service,
+    url: &Url,
+    features: tauri::webview::NewWindowFeatures,
+) -> NewWindowResponse<tauri::Wry> {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    if !service.allows_popup(url) {
+        open_external(url);
+        return NewWindowResponse::Deny;
+    }
+    let label = format!("popup-{}", SEQ.fetch_add(1, Ordering::Relaxed));
+    let blank = Url::parse("about:blank").expect("valid url");
+    let nested = app.clone();
+    let built = tauri::WebviewWindowBuilder::new(app, label, WebviewUrl::External(blank))
+        .title(service.name)
+        .inner_size(960.0, 640.0)
+        .window_features(features)
+        .on_navigation(move |url| {
+            if service.allows(url) {
+                true
+            } else {
+                open_external(url);
+                false
+            }
+        })
+        .on_new_window(move |url, features| service_popup(&nested, service, &url, features))
+        .on_document_title_changed(|window, title| {
+            let _ = window.set_title(&title);
+        })
+        .build();
+    match built {
+        Ok(window) => NewWindowResponse::Create { window },
+        Err(_) => NewWindowResponse::Deny,
+    }
+}
+
 fn open_external(url: &Url) {
     if matches!(url.scheme(), "http" | "https" | "mailto") {
         let url = links::clean(url);
@@ -198,6 +262,11 @@ fn snapshot(app: &AppHandle) -> Snapshot {
                 notify: a.notify,
                 realtime: a.realtime,
                 hide_unread: a.hide_unread,
+                signed_out: inner.signed_out.contains(&a.id),
+                on_chat: services::find(&a.service).is_some_and(|s| {
+                    app.get_webview(&webview_label(&a.id)).and_then(|w| w.url().ok()).is_some_and(|u| s.is_chat(&u))
+                }),
+                history: inner.history.get(&a.id).map(|h| h.iter().copied().collect()).unwrap_or_default(),
             })
             .collect()
     };
@@ -209,6 +278,8 @@ fn snapshot(app: &AppHandle) -> Snapshot {
         version: app.package_info().version.to_string(),
         recent: if inner.locked { Vec::new() } else { inner.recent.iter().cloned().collect() },
         pops: if inner.locked { Vec::new() } else { inner.pops.clone() },
+        away_since: if inner.locked { None } else { inner.away_since },
+        update: if inner.locked { None } else { inner.update.clone() },
     }
 }
 
@@ -449,13 +520,9 @@ fn pop_out_url(app: &AppHandle, account_id: &str, url: Url) -> Result<(), String
                 false
             }
         })
-        .on_new_window(move |url, _features| {
-            if service.allows_popup(&url) {
-                NewWindowResponse::Allow
-            } else {
-                open_external(&url);
-                NewWindowResponse::Deny
-            }
+        .on_new_window({
+            let app = app.clone();
+            move |url, features| service_popup(&app, service, &url, features)
         })
         .on_document_title_changed(move |window, title| {
             {
@@ -599,14 +666,9 @@ fn create_account_webview(app: &AppHandle, window: &Window, account: &Account, p
                 false
             }
         })
-        .on_new_window(move |url, _features| {
-            if service.allows_popup(&url) {
-                // Sign-in and call popups of the service itself, in the same profile.
-                NewWindowResponse::Allow
-            } else {
-                open_external(&url);
-                NewWindowResponse::Deny
-            }
+        .on_new_window({
+            let app = app.clone();
+            move |url, features| service_popup(&app, service, &url, features)
         })
         .on_document_title_changed(move |_webview, title| {
             set_unread(&title_app, &id, services::unread_from_title(&title));
@@ -977,10 +1039,66 @@ fn lock_now(app: AppHandle, webview: Webview) -> Result<Snapshot, String> {
     Ok(snapshot(&app))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct UpdateInfo {
     version: String,
     notes: Option<String>,
+}
+
+/// Looks for an update on its own, and offers it unless you skipped that
+/// version or asked to be reminded later: in the app, and as a notification.
+async fn look_for_update(app: &AppHandle) {
+    let Ok(updater) = app.updater() else { return };
+    let Ok(Some(found)) = updater.check().await else { return };
+    let state = app.state::<AppState>();
+    {
+        let settings = state.settings.lock().unwrap();
+        if settings.skip_version.as_deref() == Some(found.version.as_str()) || now_secs() < settings.update_remind_at {
+            return;
+        }
+    }
+    {
+        let mut inner = state.inner.lock().unwrap();
+        if !inner.offered.insert(found.version.clone()) {
+            return;
+        }
+        inner.update = Some(UpdateInfo { version: found.version.clone(), notes: found.body.clone() });
+    }
+    refresh_shell(app);
+    let click_app = app.clone();
+    let _ = system::toast(
+        &app.config().identifier,
+        "Master Chat update available",
+        &format!("Version {} is ready to install.", found.version),
+        move || show_window(&click_app),
+    );
+}
+
+/// Oha Asa's horoscope for today, in English (see horoscope.rs).
+#[tauri::command]
+async fn horoscope(webview: Webview, state: State<'_, AppState>, refresh: bool) -> Result<horoscope::Horoscope, String> {
+    guard(&webview, &state)?;
+    horoscope::get(refresh).await
+}
+
+/// Your answer to an offered update: "later" asks again in a day, "skip"
+/// never offers this version again, "close" just puts it away for now.
+#[tauri::command]
+fn answer_update(app: AppHandle, webview: Webview, state: State<'_, AppState>, version: String, choice: String) -> Result<(), String> {
+    guard(&webview, &state)?;
+    {
+        let mut settings = state.settings.lock().unwrap();
+        match choice.as_str() {
+            "later" => settings.update_remind_at = now_secs() + 24 * 3600,
+            "skip" => settings.skip_version = Some(version),
+            "close" => {}
+            _ => return Err("unknown choice".into()),
+        }
+        settings::save(&state.settings_file, &settings)?;
+    }
+    state.inner.lock().unwrap().update = None;
+    refresh_shell(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1011,6 +1129,97 @@ fn open_message(app: &AppHandle, account_id: &str, id: u32) {
     refresh_shell(app);
     if let Some(w) = app.get_webview(&webview_label(account_id)) {
         let _ = w.eval(format!("window.__mcNotificationClicked && window.__mcNotificationClicked({id})"));
+    }
+}
+
+/// A service page reports whether it shows a sign-in screen (notify.js).
+#[tauri::command]
+fn page_state(app: AppHandle, webview: Webview, signed_out: bool) -> Result<(), String> {
+    let account_id = webview.label().strip_prefix("acc-").ok_or("forbidden")?.to_string();
+    let changed = {
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
+        if !inner.accounts.iter().any(|a| a.id == account_id) {
+            return Err("unknown account".into());
+        }
+        if signed_out { inner.signed_out.insert(account_id) } else { inner.signed_out.remove(&account_id) }
+    };
+    if changed {
+        refresh_shell(&app);
+    }
+    Ok(())
+}
+
+/// The overview card's buttons: the same as the right-click menu's items.
+#[tauri::command]
+fn account_action(webview: Webview, state: State<'_, AppState>, app: AppHandle, id: String, action: String) -> Result<(), String> {
+    guard(&webview, &state)?;
+    if !matches!(action.as_str(), "reload" | "pop" | "read_all") {
+        return Err("unknown action".into());
+    }
+    if !state.inner.lock().unwrap().accounts.iter().any(|a| a.id == id) {
+        return Err("unknown account".into());
+    }
+    menus::on_account_action(&app, &action, &id);
+    Ok(())
+}
+
+/// Reply from the overview: opens the message's chat, then pops it out.
+#[tauri::command]
+fn reply_recent(app: AppHandle, webview: Webview, state: State<'_, AppState>, account: String, id: u32) -> Result<(), String> {
+    guard(&webview, &state)?;
+    if !state.inner.lock().unwrap().accounts.iter().any(|a| a.id == account) {
+        return Err("unknown account".into());
+    }
+    open_message(&app, &account, id);
+    std::thread::spawn(move || {
+        // Give the page a moment to open the chat.
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(500));
+            if pop_out(&app, &account).is_ok() {
+                return;
+            }
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn dismiss_away(app: AppHandle, webview: Webview, state: State<'_, AppState>) -> Result<(), String> {
+    guard(&webview, &state)?;
+    state.inner.lock().unwrap().away_since = None;
+    refresh_shell(&app);
+    Ok(())
+}
+
+/// Notes when you step away from the app (it loses focus, or no input for a
+/// while) and, when you're back after AWAY_MIN or more, when you left.
+fn check_presence(app: &AppHandle) {
+    let idle = system::idle_seconds();
+    let back = {
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
+        let present = inner.focused && !inner.locked && idle < 60;
+        let now = now_secs();
+        match (present, inner.left_at) {
+            (false, None) => {
+                inner.left_at = Some(now.saturating_sub(if inner.focused { idle } else { 0 }));
+                false
+            }
+            (true, Some(left)) => {
+                inner.left_at = None;
+                if now.saturating_sub(left) >= AWAY_MIN {
+                    inner.away_since = Some(left);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    };
+    if back {
+        refresh_shell(app);
     }
 }
 
@@ -1158,6 +1367,12 @@ pub fn run() {
             set_notify,
             toggle_pop,
             close_pop,
+            page_state,
+            account_action,
+            reply_recent,
+            dismiss_away,
+            answer_update,
+            horoscope,
             notify
         ])
         .on_menu_event(|app, event| menus::on_menu_event(app, event.id().as_ref()))
@@ -1198,6 +1413,12 @@ pub fn run() {
                     loaded_at: HashMap::new(),
                     pops: Vec::new(),
                     pop_seq: 0,
+                    signed_out: HashSet::new(),
+                    history: HashMap::new(),
+                    left_at: None,
+                    away_since: None,
+                    update: None,
+                    offered: HashSet::new(),
                 }),
                 settings: Mutex::new(settings),
                 accounts_file,
@@ -1267,10 +1488,42 @@ pub fn run() {
                 }
             }
 
+            // Looks for updates a minute after starting, then every 6 hours.
+            let update_app = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(60));
+                loop {
+                    tauri::async_runtime::block_on(look_for_update(&update_app));
+                    std::thread::sleep(Duration::from_secs(6 * 3600));
+                }
+            });
+
+            // Each account's unread count over the day, for the overview's charts.
+            let history_app = handle.clone();
+            std::thread::spawn(move || loop {
+                let state = history_app.state::<AppState>();
+                {
+                    let mut inner = state.inner.lock().unwrap();
+                    let counts: Vec<(String, u32)> =
+                        inner.accounts.iter().map(|a| (a.id.clone(), inner.unread.get(&a.id).copied().unwrap_or(0))).collect();
+                    inner.history.retain(|id, _| counts.iter().any(|(c, _)| c == id));
+                    for (id, n) in counts {
+                        let h = inner.history.entry(id).or_default();
+                        h.push_back(n);
+                        while h.len() > HISTORY_LEN {
+                            h.pop_front();
+                        }
+                    }
+                }
+                refresh_shell(&history_app);
+                std::thread::sleep(HISTORY_STEP);
+            });
+
             // Locks the app after the set time without keyboard or mouse input.
             let idle_app = handle.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
+                check_presence(&idle_app);
                 let state = idle_app.state::<AppState>();
                 let minutes = {
                     let s = state.settings.lock().unwrap();
@@ -1286,6 +1539,7 @@ pub fn run() {
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => layout(&events_app),
                 WindowEvent::Focused(focused) => {
                     events_app.state::<AppState>().inner.lock().unwrap().focused = *focused;
+                    check_presence(&events_app);
                 }
                 WindowEvent::CloseRequested { api, .. } if events_app.state::<AppState>().settings.lock().unwrap().close_to_tray => {
                     api.prevent_close();

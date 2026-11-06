@@ -11,7 +11,7 @@ const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 let services = [];
-let state = { accounts: [], active: null, locked: false, settings: {}, version: "", recent: [], pops: [] };
+let state = { accounts: [], active: null, locked: false, settings: {}, version: "", recent: [], pops: [], away_since: null, update: null };
 let picked = null;
 let editing = null;
 let editColor = "";
@@ -51,7 +51,7 @@ function render() {
   document.documentElement.dataset.theme = state.settings.theme === "sakura" ? "sakura" : "";
   $("#dnd").classList.toggle("on", Boolean(state.settings.dnd_until));
   $("#dnd").title = state.settings.dnd_until ? "Do Not Disturb is on" : "Do Not Disturb";
-  for (const id of ["#home", "#add", "#dnd", "#manage"]) $(id).hidden = state.locked;
+  for (const id of ["#home", "#horo", "#add", "#dnd", "#manage"]) $(id).hidden = state.locked;
   renderSidebar();
   renderDock();
   if (state.locked) {
@@ -62,6 +62,8 @@ function render() {
   }
   if (!$("#manage-panel").hidden) renderSettings();
   if (!$("#dashboard").hidden) renderDashboard();
+  // An update the app found by itself: asked about once per version.
+  maybeOfferUpdate();
 }
 
 function renderDock() {
@@ -81,6 +83,58 @@ function renderDock() {
         el("button", { className: "close", title: "Close", "aria-label": `Close ${name}`, textContent: "×", onclick: () => invoke("close_pop", { label: p.label }) }),
       ]);
     })
+  );
+}
+
+function duration(seconds) {
+  const m = Math.round(seconds / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return m % 60 && h < 10 ? `${h} h ${m % 60} min` : `${h} h`;
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+// A small line of an account's unread count over the day (one point per 15 minutes).
+function sparkline(history, current) {
+  const points = [...history, current];
+  if (points.length < 3) return null;
+  const max = Math.max(1, ...points);
+  const w = 100, h = 22;
+  const xy = points.map((v, i) => `${((i / (points.length - 1)) * w).toFixed(1)},${(h - 1 - (v / max) * (h - 2)).toFixed(1)}`);
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("class", "spark");
+  const area = document.createElementNS(SVG, "polygon");
+  area.setAttribute("points", `0,${h} ${xy.join(" ")} ${w},${h}`);
+  const line = document.createElementNS(SVG, "polyline");
+  line.setAttribute("points", xy.join(" "));
+  svg.append(area, line);
+  const hours = Math.round(((points.length - 1) * 15) / 60);
+  const title = document.createElementNS(SVG, "title");
+  title.textContent = `Unread over the last ${hours ? `${hours} h` : "hour"}: highest ${Math.max(...points)}, now ${current}`;
+  svg.append(title);
+  return svg;
+}
+
+// "While you were away": what came in, per account, with who sent it.
+function renderAway() {
+  const since = state.away_since;
+  const fresh = since ? state.recent.filter((r) => r.at >= since && state.accounts.some((a) => a.id === r.account)) : [];
+  $("#dash-away").hidden = fresh.length === 0;
+  if (!fresh.length) return;
+  const parts = state.accounts
+    .map((a) => {
+      const mine = fresh.filter((r) => r.account === a.id);
+      if (!mine.length) return null;
+      const names = [...new Set(mine.map((r) => r.title).filter(Boolean))];
+      const who = names.length ? ` (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""})` : "";
+      return `${a.label} ${mine.length}${who}`;
+    })
+    .filter(Boolean);
+  $("#dash-away p").replaceChildren(
+    el("b", { textContent: `While you were away (${duration(Date.now() / 1000 - since)}): ${fresh.length} new` }),
+    el("span", { textContent: parts.join(" · ") })
   );
 }
 
@@ -106,12 +160,24 @@ function renderDashboard() {
   if (s.dnd_until) chips.push(el("span", { className: "chip dnd", textContent: "Do Not Disturb" }));
   if (!s.notifications) chips.push(el("span", { className: "chip", textContent: "Notifications off" }));
   if (s.lock_enabled) chips.push(el("span", { className: "chip", textContent: "App lock on" }));
+  // Your sign's place today, once the horoscope has been loaded.
+  const mine = horoscope?.signs.find((s) => s.name === mySign());
+  if (mine) {
+    chips.push(
+      el("button", { className: "chip horo-chip", title: mine.lines.join(" "), onclick: () => openPanel("horo-panel") }, [
+        el("span", { textContent: `${mine.name} #${mine.rank} today` }),
+      ])
+    );
+  }
   $("#dash-status").replaceChildren(...chips);
+  renderAway();
 
   $("#dash-accounts").replaceChildren(
     ...state.accounts.map((a) => {
       const svc = serviceOf(a.service);
-      const count = a.hide_unread
+      const count = a.signed_out
+        ? [el("span", { className: "out", textContent: "Sign in again" })]
+        : a.hide_unread
         ? [el("span", { className: "done", textContent: "Count hidden" })]
         : a.unread
           ? [el("b", { textContent: a.unread > 999 ? "999+" : a.unread }), el("small", { textContent: "unread" })]
@@ -130,7 +196,24 @@ function renderDashboard() {
         e.preventDefault();
         invoke("show_account_menu", { id: a.id });
       };
-      return el("div", { className: "card", style: `--c:${colorOf(a)}`, oncontextmenu: menu }, [
+      // Small buttons for the menu's most used items.
+      const action = (name, label, path) =>
+        el("button", { className: "act", title: label, "aria-label": `${label}: ${a.label}`, onclick: () => invoke("account_action", { id: a.id, action: name }) }, [
+          (() => {
+            const svg = document.createElementNS(SVG, "svg");
+            svg.setAttribute("viewBox", "0 0 24 24");
+            const d = document.createElementNS(SVG, "path");
+            d.setAttribute("d", path);
+            svg.append(d);
+            return svg;
+          })(),
+        ]);
+      const actions = [];
+      if (a.service === "gmail") actions.push(action("read_all", "Mark all as read", "M2 13l5 5L18 7M9 13l5 5L22 9"));
+      if (a.on_chat) actions.push(action("pop", "Pop out this chat", "M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"));
+      actions.push(action("reload", "Reload", "M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"));
+      const spark = a.signed_out ? null : sparkline(a.history || [], a.unread);
+      return el("div", { className: `card${a.signed_out ? " signed-out" : ""}`, style: `--c:${colorOf(a)}`, oncontextmenu: menu }, [
         el("button", { className: "open", onclick: () => select(a.id) }, [
           logo(svc.id, colorOf(a), "dot"),
           el("span", { className: "who" }, [
@@ -139,6 +222,11 @@ function renderDashboard() {
           ]),
           el("span", { className: "count" }, count),
         ]),
+        ...(a.signed_out
+          ? [el("p", { className: "out-note", textContent: "Signed out: no new messages arrive until you sign in. Click the card to open it." })]
+          : spark
+            ? [spark]
+            : []),
         el("div", { className: "ticks" }, [
           el(
             "label",
@@ -154,12 +242,32 @@ function renderDashboard() {
             },
             [tick("set_realtime", a.realtime), el("span", { textContent: "Real-time" })]
           ),
+          el("span", { className: "acts" }, actions),
         ]),
       ]);
     })
   );
 
-  const recent = state.recent.filter((r) => state.accounts.some((a) => a.id === r.account));
+  // The account filter lists the accounts that have messages here.
+  const all = state.recent.filter((r) => state.accounts.some((a) => a.id === r.account));
+  const filter = $("#recent-account");
+  const chosen = filter.value;
+  const withMessages = state.accounts.filter((a) => all.some((r) => r.account === a.id));
+  // Rebuilt only when the list changes, so an open dropdown stays open.
+  const options = withMessages.map((a) => [a.id, `${a.label} (${serviceOf(a.service).name})`]);
+  if (filter.dataset.key !== JSON.stringify(options)) {
+    filter.dataset.key = JSON.stringify(options);
+    filter.replaceChildren(
+      el("option", { value: "", textContent: "All accounts" }),
+      ...options.map(([value, textContent]) => el("option", { value, textContent }))
+    );
+    filter.value = withMessages.some((a) => a.id === chosen) ? chosen : "";
+  }
+  const query = $("#recent-search").value.trim().toLowerCase();
+  const recent = all.filter(
+    (r) => (!filter.value || r.account === filter.value) && (!query || `${r.title} ${r.body}`.toLowerCase().includes(query))
+  );
+  $(".recent-tools").hidden = all.length === 0;
   $("#dash-recent").replaceChildren(
     ...recent.map((r) => {
       const a = state.accounts.find((x) => x.id === r.account);
@@ -173,11 +281,15 @@ function renderDashboard() {
           ]),
           el("span", { className: "meta", textContent: `${a.label} · ${ago(r.at)}` }),
         ]),
+        // Messenger chats open in a pop-out, to answer without leaving what you're on.
+        ...(a.service === "messenger" && r.id
+          ? [el("button", { className: "reply ghost small", textContent: "Reply", title: "Open this chat in a pop-out window", onclick: () => invoke("reply_recent", { account: r.account, id: r.id }) })]
+          : []),
       ]);
     })
   );
-  $("#dash-empty").hidden = recent.length > 0;
-  $("#clear-recent").hidden = recent.length === 0;
+  $("#dash-empty").hidden = all.length > 0;
+  $("#dash-nomatch").hidden = all.length === 0 || recent.length > 0;
 }
 
 async function openRecent(r) {
@@ -297,6 +409,7 @@ function setState(next) {
 function showOnly(id) {
   for (const p of $$(".panel")) p.hidden = p.id !== id;
   $("#home").classList.toggle("current", id === "dashboard");
+  $("#horo").classList.toggle("current", id === "horo-panel");
 }
 
 // Panels sit under the service webviews, so the active one is hidden while a panel is open.
@@ -315,6 +428,7 @@ async function openPanel(id) {
     renderSettings();
   }
   if (id === "dashboard") renderDashboard();
+  if (id === "horo-panel") loadHoroscope(false);
   await invoke("set_overlay", { open: true });
 }
 
@@ -334,7 +448,15 @@ async function select(id) {
 const update = (changes) => invoke("update_settings", { update: changes }).then(setState).catch((e) => alert(e));
 
 $("#home").addEventListener("click", () => openPanel("dashboard"));
+$("#horo").addEventListener("click", () => openPanel("horo-panel"));
 $("#clear-recent").addEventListener("click", async () => setState(await invoke("clear_recent")));
+$("#recent-search").addEventListener("input", renderDashboard);
+$("#recent-account").addEventListener("change", renderDashboard);
+$("#dismiss-away").addEventListener("click", async () => {
+  state.away_since = null;
+  renderAway();
+  await invoke("dismiss_away");
+});
 // Keeps "5 min" and the like current while the overview is open.
 setInterval(() => $("#dashboard").hidden || renderDashboard(), 30000);
 $("#add").addEventListener("click", () => openPanel("add-panel"));
@@ -424,7 +546,129 @@ async function turnOffLock() {
   }
 }
 
-// Updates.
+// Oha Asa: today's horoscope, fetched (and translated) by the app.
+let horoscope = null;
+let horoscopeAt = 0;
+const store = {
+  get: (k) => {
+    try {
+      return localStorage.getItem(k) || "";
+    } catch {
+      return "";
+    }
+  },
+  set: (k, v) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {}
+  },
+};
+const mySign = () => store.get("horoscope-sign");
+$("#horo-sign").value = mySign();
+$("#horo-ja").checked = store.get("horoscope-ja") === "1";
+
+async function loadHoroscope(refresh) {
+  const status = $("#horo-status");
+  if (!horoscope || refresh) status.textContent = "Loading today's horoscope…";
+  try {
+    horoscope = await invoke("horoscope", { refresh });
+    horoscopeAt = Date.now();
+    status.textContent = horoscope.translated ? "" : "Couldn't reach the translation service, so this is in Japanese. Try Refresh in a while.";
+  } catch (e) {
+    status.textContent = horoscope ? "" : "Couldn't load the horoscope. Check your connection and try Refresh.";
+    console.warn(e);
+  }
+  renderHoroscope();
+  if (!$("#dashboard").hidden) renderDashboard();
+}
+
+function renderHoroscope() {
+  if (!horoscope) {
+    $("#horo-list").replaceChildren();
+    $("#horo-date").textContent = "";
+    return;
+  }
+  const day = new Date(`${horoscope.date}T00:00:00`);
+  $("#horo-date").textContent = day.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  const ja = $("#horo-ja").checked;
+  const sign = mySign();
+  $("#horo-list").replaceChildren(
+    ...horoscope.signs.map((s) =>
+      el("li", { className: `${s.name === sign ? "mine " : ""}${s.rank <= 3 ? "top" : s.rank === 12 ? "last" : ""}` }, [
+        el("span", { className: "rank", textContent: s.rank }),
+        el("div", { className: "body" }, [
+          el("div", { className: "name" }, [el("b", { textContent: s.name }), el("small", { textContent: s.name_ja })]),
+          ...(ja ? s.lines_ja : s.lines).map((line) => el("p", { textContent: line })),
+          el("p", { className: "lucky", textContent: `${ja ? "ラッキー" : "Lucky"}: ${ja ? s.lucky_ja : s.lucky}` }),
+        ]),
+      ])
+    )
+  );
+  // Your sign in view.
+  const yours = $("#horo-list .mine");
+  if (yours && !$("#horo-panel").hidden) yours.scrollIntoView({ block: "nearest" });
+}
+
+$("#horo-sign").addEventListener("change", (e) => {
+  store.set("horoscope-sign", e.target.value);
+  renderHoroscope();
+});
+$("#horo-ja").addEventListener("change", (e) => {
+  store.set("horoscope-ja", e.target.checked ? "1" : "");
+  renderHoroscope();
+});
+$("#horo-refresh").addEventListener("click", () => loadHoroscope(true));
+// The overview's chip: kept fresh while the app runs (the app itself fetches at most hourly).
+setInterval(() => mySign() && Date.now() - horoscopeAt > 3600_000 && loadHoroscope(false), 60_000);
+
+// Updates: offered in a panel, with "notify me later" and "skip this version".
+let offeredVersion = null;
+let started = false;
+function maybeOfferUpdate() {
+  if (started && state.update && !state.locked && offeredVersion !== state.update.version) offerUpdate(state.update, true);
+}
+let offer = null;
+let panelBeforeOffer = null;
+function offerUpdate(found, automatic) {
+  offeredVersion = found.version;
+  offer = { ...found, automatic };
+  panelBeforeOffer = $$(".panel").find((p) => !p.hidden)?.id ?? null;
+  $("#update-text").textContent = `Master Chat ${found.version} is ready to install. You have ${state.version}. The app restarts to finish.`;
+  $("#update-notes").textContent = found.notes || "";
+  $("#update-notes").hidden = !found.notes;
+  $("#update-later").checked = automatic;
+  $("#update-skip").checked = false;
+  $("#update-error").hidden = true;
+  $("#update-now").disabled = false;
+  $("#update-now").textContent = "Update now";
+  openPanel("update-panel");
+}
+// The two ticks are one choice: ticking one unticks the other.
+$("#update-later").addEventListener("change", (e) => e.target.checked && ($("#update-skip").checked = false));
+$("#update-skip").addEventListener("change", (e) => e.target.checked && ($("#update-later").checked = false));
+$("#update-cancel").addEventListener("click", async () => {
+  const choice = $("#update-skip").checked ? "skip" : $("#update-later").checked ? "later" : "close";
+  const back = panelBeforeOffer && panelBeforeOffer !== "update-panel" ? panelBeforeOffer : null;
+  if (back) openPanel(back);
+  else closePanel();
+  if (offer) await invoke("answer_update", { version: offer.version, choice }).catch(() => {});
+  offer = null;
+});
+$("#update-now").addEventListener("click", async () => {
+  $("#update-now").disabled = true;
+  $("#update-now").textContent = "Downloading…";
+  $("#update-error").hidden = true;
+  try {
+    await invoke("install_update");
+  } catch (e) {
+    $("#update-error").textContent = "The update couldn't be installed. Check your connection and try again.";
+    $("#update-error").hidden = false;
+    $("#update-now").disabled = false;
+    $("#update-now").textContent = "Update now";
+    console.warn(e);
+  }
+});
+
 $("#check-update").addEventListener("click", async () => {
   const status = $("#update-status");
   status.textContent = "Checking…";
@@ -435,10 +679,7 @@ $("#check-update").addEventListener("click", async () => {
       return;
     }
     status.textContent = `Version ${found.version} is available.`;
-    if (confirm(`Install Master Chat ${found.version} now? The app will restart.`)) {
-      status.textContent = "Downloading…";
-      await invoke("install_update");
-    }
+    offerUpdate(found, false);
   } catch (e) {
     status.textContent = "Couldn't check for updates.";
     console.warn(e);
@@ -535,6 +776,10 @@ window.masterChat = {
   if (!state.locked) {
     // The overview is the start screen.
     if (state.accounts.length === 0) showOnly("welcome");
-    else openPanel("dashboard");
+    else await openPanel("dashboard");
   }
+  // Then any update found meanwhile, on top of the start screen.
+  started = true;
+  maybeOfferUpdate();
+  if (mySign()) loadHoroscope(false);
 })();

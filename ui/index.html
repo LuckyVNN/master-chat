@@ -11,6 +11,9 @@
     <button id="home" class="tool plain" title="Overview" aria-label="Overview">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z"/></svg>
     </button>
+    <button id="horo" class="tool plain" title="Oha Asa horoscope" aria-label="Oha Asa horoscope">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 2l2.6 6.3 6.8.6-5.2 4.5 1.6 6.6L12 16.6 6.2 20l1.6-6.6L2.6 8.9l6.8-.6z"/></svg>
+    </button>
     <div id="accounts"></div>
     <button id="add" class="tool" title="Add account" aria-label="Add account">+</button>
     <div class="spacer"></div>
@@ -37,13 +40,22 @@
         </div>
         <div id="dash-status" class="chips"></div>
       </header>
+      <div id="dash-away" class="away" hidden>
+        <p></p>
+        <button id="dismiss-away" class="ghost small" aria-label="Dismiss">×</button>
+      </div>
       <div id="dash-accounts" class="dash-grid"></div>
       <p class="hint dash-hint"><b>Notifications</b>: pop-ups for that account; untick to mute it (its messages still show below). <b>Real-time</b>: stays fully awake while hidden, so messages arrive at once; untick to let it rest and save memory, and its messages may come a few minutes late.</p>
       <div class="dash-recent-head">
         <h3>Recent messages</h3>
-        <button id="clear-recent" class="ghost small">Clear</button>
+        <div class="recent-tools">
+          <input id="recent-search" type="search" placeholder="Search" autocomplete="off" aria-label="Search recent messages">
+          <select id="recent-account" aria-label="Show messages from"><option value="">All accounts</option></select>
+          <button id="clear-recent" class="ghost small">Clear</button>
+        </div>
       </div>
       <ul id="dash-recent"></ul>
+      <p id="dash-nomatch" class="hint" hidden>No messages match.</p>
       <p id="dash-empty" class="hint">Messages that arrive while Master Chat is open show up here, from every account, even muted ones or in Do Not Disturb. They're kept in memory only, never saved.</p>
     </section>
 
@@ -82,6 +94,41 @@
       <div class="actions">
         <button class="ghost" data-close>Cancel</button>
         <button id="confirm-edit" class="primary">Save</button>
+      </div>
+    </section>
+
+    <section id="horo-panel" class="panel horo" hidden>
+      <header class="dash-head">
+        <div>
+          <h2>Oha Asa horoscope</h2>
+          <p id="horo-date"></p>
+        </div>
+        <div class="horo-tools">
+          <select id="horo-sign" aria-label="Your sign">
+            <option value="">Your sign…</option>
+            <option>Aries</option><option>Taurus</option><option>Gemini</option><option>Cancer</option>
+            <option>Leo</option><option>Virgo</option><option>Libra</option><option>Scorpio</option>
+            <option>Sagittarius</option><option>Capricorn</option><option>Aquarius</option><option>Pisces</option>
+          </select>
+          <label class="ja-toggle"><input id="horo-ja" type="checkbox"> 日本語</label>
+          <button id="horo-refresh" class="ghost small">Refresh</button>
+        </div>
+      </header>
+      <p id="horo-status" class="hint"></p>
+      <ol id="horo-list"></ol>
+      <p class="hint horo-source">From Asahi TV's <i>Oha Asa</i>, ranked 1 to 12, updated each weekday morning. English by machine translation.</p>
+    </section>
+
+    <section id="update-panel" class="panel" hidden>
+      <h2>Update available</h2>
+      <p id="update-text"></p>
+      <div id="update-notes" class="notes" hidden></div>
+      <label class="row tick"><span>Notify me later <small>Ask again tomorrow</small></span><input id="update-later" type="checkbox"></label>
+      <label class="row tick"><span>Skip this version <small>Only offer the next one</small></span><input id="update-skip" type="checkbox"></label>
+      <p id="update-error" class="error" hidden></p>
+      <div class="actions">
+        <button id="update-cancel" class="ghost">Cancel</button>
+        <button id="update-now" class="primary">Update now</button>
       </div>
     </section>
 

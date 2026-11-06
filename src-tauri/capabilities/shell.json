@@ -29,6 +29,11 @@
     "allow-set-realtime",
     "allow-set-notify",
     "allow-toggle-pop",
-    "allow-close-pop"
+    "allow-close-pop",
+    "allow-account-action",
+    "allow-reply-recent",
+    "allow-dismiss-away",
+    "allow-answer-update",
+    "allow-horoscope"
   ]
 }

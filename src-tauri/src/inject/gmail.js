@@ -1,6 +1,6 @@
 // New mail, described. Gmail only notifies if you turn its desktop
-// notifications on, and then without much detail, so this watches the inbox
-// list instead: when an unread email appears, it raises a notification
+// notifications on, and then without much detail, so this watches for unread
+// mail instead: when a new email arrives, it raises a notification
 // (through notify.js) with the sender, subject and preview. Clicking it opens
 // the email.
 (() => {
@@ -68,10 +68,60 @@
     }
   };
 
+  // New mail comes from Gmail's own feed of unread inbox mail: it lists every
+  // message (a reply in a thread you've seen too), whatever page or inbox tab
+  // you're on. Each one is told once, by its id; what's unread when the app
+  // starts is old news.
+  const base = () => (location.pathname.match(/^\/mail\/u\/\d+/) || ["/mail/u/0"])[0];
+  const told = new Set();
+  let primed = false;
+  let feedWorks = false;
+  // Promotions and Social mail isn't news: their own feeds say which to skip.
+  const SKIP = ["^sq_ig_i_promo", "^sq_ig_i_social"];
+  const feed = async (label = "") => {
+    const path = label ? `/feed/atom/${encodeURIComponent(label)}` : "/feed/atom";
+    const response = await fetch(`${base()}${path}`, { credentials: "include", cache: "no-store" });
+    if (!response.ok) return null;
+    const xml = new DOMParser().parseFromString(await response.text(), "application/xml");
+    return xml.querySelector("parsererror") ? null : xml;
+  };
+  const idOf = (entry) => (entry.getElementsByTagName("id")[0]?.textContent || "").trim();
+  const pollFeed = async () => {
+    try {
+      const [xml, ...skipped] = await Promise.all([feed(), ...SKIP.map((label) => feed(label).catch(() => null))]);
+      if (!xml) return;
+      feedWorks = true;
+      const skip = new Set(skipped.flatMap((x) => (x ? [...x.getElementsByTagName("entry")].map(idOf) : [])));
+      for (const entry of xml.getElementsByTagName("entry")) {
+        const get = (tag, from = entry) => (from.getElementsByTagName(tag)[0]?.textContent || "").trim();
+        const id = idOf(entry);
+        if (!id || told.has(id)) continue;
+        told.add(id);
+        if (!primed || skip.has(id)) continue;
+        const author = entry.getElementsByTagName("author")[0];
+        const name = (author && (get("name", author) || get("email", author))) || "New email";
+        const subject = get("title");
+        const preview = get("summary");
+        const link = entry.getElementsByTagName("link")[0]?.getAttribute("href") || "";
+        const messageId = link.match(/message_id=([0-9a-f]+)/i)?.[1];
+        const notification = new Notification(name, { body: [subject, preview].filter(Boolean).join(" — ") });
+        notification.onclick = () => {
+          if (messageId) location.hash = `#inbox/${messageId}`;
+        };
+      }
+      primed = true;
+    } catch {
+      // Offline or signed out: try again next time.
+    }
+  };
+  pollFeed();
+  setInterval(pollFeed, 20000);
+
+  // If the feed can't be read, the inbox list on screen is watched instead.
   const notified = new Set();
   let quietUntil = 0;
   setInterval(() => {
-    if (!inInbox()) return;
+    if (feedWorks || !inInbox()) return;
     const rows = [...document.querySelectorAll("tr.zA.zE")];
     if (!document.querySelector("tr.zA")) return;
     // The list fills in as Gmail loads; what's unread by then is old news.

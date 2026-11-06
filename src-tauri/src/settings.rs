@@ -17,6 +17,10 @@ pub struct Settings {
     pub dnd_until: Option<u64>,
     pub panic_shortcut: bool,
     pub lock: LockSettings,
+    /// An update you chose to skip: it isn't offered again (a newer one is).
+    pub skip_version: Option<String>,
+    /// "Notify me later": no update is offered before this time (seconds).
+    pub update_remind_at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -43,6 +47,8 @@ impl Default for Settings {
             dnd_until: None,
             panic_shortcut: true,
             lock: LockSettings { idle_minutes: 10, ..Default::default() },
+            skip_version: None,
+            update_remind_at: 0,
         }
     }
 }

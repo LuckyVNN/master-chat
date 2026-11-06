@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-page-state"
+description = "Enables the page_state command without any pre-configured scope."
+commands.allow = ["page_state"]
+
+[[permission]]
+identifier = "deny-page-state"
+description = "Denies the page_state command without any pre-configured scope."
+commands.deny = ["page_state"]

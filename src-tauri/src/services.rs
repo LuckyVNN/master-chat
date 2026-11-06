@@ -177,7 +177,9 @@ impl Service {
     /// New windows stay in the app only on the service's domains and, if it
     /// limits them, on its popup paths (calls, the photo viewer).
     pub fn allows_popup(&self, url: &Url) -> bool {
-        self.allows(url) && self.popup_paths.is_none_or(|paths| paths.iter().any(|p| url.path().starts_with(p)))
+        // A call window opens blank first, then loads the call.
+        url.as_str() == "about:blank"
+            || self.allows(url) && self.popup_paths.is_none_or(|paths| paths.iter().any(|p| url.path().starts_with(p)))
     }
 }
 
@@ -215,6 +217,7 @@ mod tests {
         let messenger = find("messenger").unwrap();
         assert!(messenger.allows_popup(&Url::parse("https://www.facebook.com/groupcall/ROOM:123").unwrap()));
         assert!(!messenger.allows_popup(&Url::parse("https://www.facebook.com/reel/123").unwrap()));
+        assert!(messenger.allows_popup(&Url::parse("about:blank").unwrap()));
         assert!(gmail.allows_popup(&Url::parse("https://accounts.google.com/").unwrap()));
         assert!(gmail.is_sign_in(&Url::parse("https://accounts.google.com/v3/signin").unwrap()));
         assert!(!gmail.is_sign_in(&Url::parse("https://mail.google.com/").unwrap()));

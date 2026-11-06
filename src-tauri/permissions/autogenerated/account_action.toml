@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-account-action"
+description = "Enables the account_action command without any pre-configured scope."
+commands.allow = ["account_action"]
+
+[[permission]]
+identifier = "deny-account-action"
+description = "Denies the account_action command without any pre-configured scope."
+commands.deny = ["account_action"]
